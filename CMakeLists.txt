@@ -41,7 +41,7 @@ if(ANDROID)
 endif()
 # Версия для людей (имя APK, «О программе»): этап и номер сборки.
 set(TAMIC_VERSION_NAME "2.0.0")
-set(TAMIC_VERSION_CODE 5)
+set(TAMIC_VERSION_CODE 6)
 qt_standard_project_setup(REQUIRES 6.7)
 # QML-файлы в подпапках (src/app/qml) получают свой qmldir — поведение Qt 6.8+.
 qt_policy(SET QTP0004 NEW)

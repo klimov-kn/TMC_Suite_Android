@@ -22,6 +22,7 @@
 
 #include <QPointF>
 #include <QQuickPaintedItem>
+#include <QTimer>
 #include <QRectF>
 #include <QSet>
 #include <QStringList>
@@ -183,6 +184,7 @@ protected:
 private:
     void scheduleLoad();
     void startLoad();
+    void markMoving();             // идёт жест: лёгкие кадры, по паузе — чистый кадр
     void applyRebuild(bool keepX);
     QRectF autoView() const;
     QRectF plotRect(const QSizeF &size, bool forExport) const;
@@ -193,7 +195,7 @@ private:
     void draw(QPainter *p, const QSizeF &size, bool forExport) const;
     void drawCartesianGrid(QPainter *p, const QRectF &plot, const QRectF &view) const;
     void drawPolarGrid(QPainter *p, const QRectF &plot, const QRectF &view) const;
-    void drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) const;
+    void drawSeries(QPainter *p, const QRectF &plot, const QRectF &view, bool forExport) const;
     void drawPick(QPainter *p, const QRectF &plot, const QRectF &view) const;
     void drawLegend(QPainter *p, const QRectF &area) const;
 
@@ -211,7 +213,10 @@ private:
     QSet<QString> m_seen;          // ключи рядов, уже бывших в списке (новые — по умолчанию)
     bool m_selectionTouched = false;
     QRectF m_view;                 // окно просмотра (единицы плоскости графика)
+    QRectF m_home;                 // исходный вид: предел масштаба (жест не обходит все точки)
     bool m_zoomed = false;
+    bool m_moving = false;         // идёт жест (см. LineDetail в chartbase.cpp)
+    QTimer m_settle;               // пауза после жеста
     int m_pickSeries = -1;
     qint64 m_pickIndex = -1;
     quint64 m_generation = 0;

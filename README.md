@@ -119,7 +119,8 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 
 # release APK and AAB, not signed
 & $cmake --preset android-arm64-release
-& $cmake --build --preset android-arm64-release --target apk aab
+& $cmake --build --preset android-arm64-release --target apk
+& $cmake --build --preset android-arm64-release --target aab
 ```
 
 The first build takes about 15 minutes because Gradle downloads itself and its plugins. The build gives
@@ -290,7 +291,8 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 
 # выпускные APK и AAB без подписи
 & $cmake --preset android-arm64-release
-& $cmake --build --preset android-arm64-release --target apk aab
+& $cmake --build --preset android-arm64-release --target apk
+& $cmake --build --preset android-arm64-release --target aab
 ```
 
 Первая сборка идёт около 15 минут: Gradle скачивает себя и свои модули. Предупреждений компилятора при сборке

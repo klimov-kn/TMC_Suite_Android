@@ -233,7 +233,7 @@ Item {
                 required property int index
                 width: ListView.view.width
                 readonly property bool newGroup: index === 0
-                    || (screen.chart && screen.chart.series[index - 1].group !== modelData.group)
+                    || ListView.view.model[index - 1].group !== modelData.group
                 Text {
                     visible: rowItem.newGroup && (screen.files.length > 1 || screen.compare.length > 0)
                     height: visible ? implicitHeight + 6 : 0
@@ -289,7 +289,14 @@ Item {
                     MouseArea {
                         id: rowArea
                         anchors.fill: parent
-                        onClicked: screen.chart.setSeriesVisible(rowItem.index, !rowItem.modelData.visible)
+                        onClicked: {
+                            // Модель пересоздаётся, строка исчезает: длинный список не должен
+                            // прыгать к началу, поэтому ссылка на него — в локальной переменной.
+                            const list = seriesList
+                            const y = list.contentY
+                            screen.chart.setSeriesVisible(rowItem.index, !rowItem.modelData.visible)
+                            list.contentY = y
+                        }
                     }
                 }
             }

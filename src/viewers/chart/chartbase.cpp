@@ -33,6 +33,27 @@ constexpr qreal kPickFont = 13;      // значение точки — JetBrain
 constexpr qreal kPad = 10;
 constexpr qreal kTouchRadius = 48;   // касание точки: не дальше 48 пикселей
 constexpr qreal kSeriesWidth = 2.0;
+constexpr qreal kDenseSeriesWidth = 1.5;   // кривых много: средняя линия
+
+// Способ линии — по цене кадра: кадр рисуется, пока поток интерфейса стоит. Замер на телефоне:
+// цена толстой сглаженной линии растёт быстрее длины, поэтому она идёт кусками по kLineChunk
+// вершин (64 кривые по 8000 точек: 11 с одним контуром, 0,76 с кусками), а тонкая обходится
+// в полмикросекунды на вершину. Маркер стоит 200 мкс, поэтому на густом графике маркеров нет.
+enum class LineDetail {
+    Full,     // как задумано: 2 пикселя, маркеры
+    Medium,   // тоньше и со срезанными углами
+    Thin,     // один пиксель экрана, сглаженный
+    Draft     // кадр жеста: один пиксель без сглаживания, столбцы шире
+};
+constexpr int kLineChunk = 16;
+constexpr int kFullSeries = 8;
+constexpr qint64 kFullVertices = 4000;
+constexpr int kMediumSeries = 16;
+constexpr qint64 kMediumVertices = 20000;
+constexpr int kMovingFullSeries = 4;
+constexpr qint64 kMovingFullVertices = 1500;
+constexpr int kDraftSeriesPerColumn = 32;   // столбец жеста шире на 1 пиксель на каждые 32 кривые
+constexpr int kSettleMs = 140;              // пауза после жеста перед чистым кадром
 
 double niceStep(double raw, double *mantissa)
 {
@@ -133,6 +154,12 @@ ChartBase::ChartBase(QQuickItem *parent)
         clearPick();
         resetView();
     };
+    m_settle.setSingleShot(true);
+    m_settle.setInterval(kSettleMs);
+    connect(&m_settle, &QTimer::timeout, this, [this] {
+        m_moving = false;
+        update();
+    });
     connect(this, &QQuickItem::widthChanged, this, [this] { update(); });
     connect(this, &QQuickItem::heightChanged, this, [this] { update(); });
     // Смена языка: подписи осей, рядов и сводки — заново.
@@ -318,6 +345,7 @@ void ChartBase::applyRebuild(bool keepX)
     }
 
     const QRectF autoRect = autoView();
+    m_home = autoRect;
     if (keepX && m_zoomed && !m_polar) {
         // Смена вида оси Y: окно по X сохраняется, Y — заново по видимой части.
         QRectF r = m_view;
@@ -368,8 +396,9 @@ void ChartBase::setSeriesVisible(int index, bool visible)
         m_pickSeries = -1;
         m_pickIndex = -1;
     }
+    m_home = autoView();
     if (!m_zoomed) {
-        m_view = autoView();
+        m_view = m_home;
     }
     emit seriesChanged();
     emit viewChanged();
@@ -507,16 +536,16 @@ void ChartBase::zoomAt(qreal factor, qreal x, qreal y)
         return;
     const QRectF plot = plotRect(size(), false);
     const QRectF view = effectiveView(plot);
-    const QRectF home = autoView();
     // Не дальше 1e6 крупнее и 4 раз мельче исходного вида.
     const double w = view.width() / factor;
-    if (w < home.width() * 1e-6 || w > home.width() * 4)
+    if (w < m_home.width() * 1e-6 || w > m_home.width() * 4)
         return;
     const QPointF d = toData(plot, view, QPointF(x, y));
     const double nl = d.x() - (d.x() - view.left()) / factor;
     const double nb = d.y() - (d.y() - view.top()) / factor;
     m_view = QRectF(nl, nb, view.width() / factor, view.height() / factor);
     m_zoomed = true;
+    markMoving();
     emit viewChanged();
     update();
 }
@@ -531,8 +560,15 @@ void ChartBase::panBy(qreal dx, qreal dy)
     const double sy = plot.height() / view.height();
     m_view = QRectF(view.left() - dx / sx, view.top() + dy / sy, view.width(), view.height());
     m_zoomed = true;
+    markMoving();
     emit viewChanged();
     update();
+}
+
+void ChartBase::markMoving()
+{
+    m_moving = true;
+    m_settle.start();
 }
 
 void ChartBase::resetView()
@@ -701,7 +737,7 @@ void ChartBase::draw(QPainter *p, const QSizeF &size, bool forExport) const
 
     p->save();
     p->setClipRect(plot.adjusted(-1, -1, 1, 1));
-    drawSeries(p, plot, view);
+    drawSeries(p, plot, view, forExport);
     drawPick(p, plot, view);
     p->restore();
 
@@ -827,16 +863,43 @@ void ChartBase::drawPolarGrid(QPainter *p, const QRectF &plot, const QRectF &vie
     }
 }
 
-void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) const
+void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view, bool forExport) const
 {
+    int shown = 0;
+    qint64 vertices = 0;
+    const qint64 seriesLimit = qint64(plot.width() * 4 + 8);   // после прореживания
+    for (const Series &s : m_series) {
+        if (!s.visible)
+            continue;
+        ++shown;
+        vertices += std::min<qint64>(qint64(s.x.size()), seriesLimit);
+    }
+    LineDetail detail = LineDetail::Thin;
+    if (forExport)
+        detail = LineDetail::Full;
+    else if (m_moving)
+        detail = shown <= kMovingFullSeries && vertices <= kMovingFullVertices ? LineDetail::Full : LineDetail::Draft;
+    else if (shown <= kFullSeries && vertices <= kFullVertices)
+        detail = LineDetail::Full;
+    else if (shown <= kMediumSeries && vertices <= kMediumVertices)
+        detail = LineDetail::Medium;
+    const bool thin = detail == LineDetail::Thin || detail == LineDetail::Draft;
+    const qreal columnWidth = detail == LineDetail::Draft ? std::max(1, shown / kDraftSeriesPerColumn) : 1;
+
+    p->setRenderHint(QPainter::Antialiasing, detail != LineDetail::Draft);
     for (const Series &s : m_series) {
         if (!s.visible || s.x.empty())
             continue;
         const QColor color = theme::series(s.colorIndex);
         QPen pen(color);
-        pen.setWidthF(kSeriesWidth);
-        pen.setJoinStyle(Qt::RoundJoin);
-        pen.setCapStyle(Qt::RoundCap);
+        if (thin) {
+            pen.setWidth(0);
+            pen.setCosmetic(true);
+        } else {
+            pen.setWidthF(detail == LineDetail::Full ? kSeriesWidth : kDenseSeriesWidth);
+            pen.setJoinStyle(detail == LineDetail::Full ? Qt::RoundJoin : Qt::BevelJoin);
+            pen.setCapStyle(Qt::RoundCap);
+        }
         if (s.compared)
             pen.setStyle(Qt::DashLine);   // файл сравнения — пунктиром
         p->setPen(pen);
@@ -846,14 +909,27 @@ void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) 
         // а рисовать 50 тысяч отрезков на каждый кадр жеста не нужно).
         QPolygonF poly;
         poly.reserve(int(std::min<size_t>(s.x.size(), size_t(plot.width() * 4 + 8))));
+        qreal dashLength = 0;   // пунктир идёт через границы кусков
         auto flush = [&]() {
-            if (poly.size() > 1)
-                p->drawPolyline(poly);
-            else if (poly.size() == 1)
+            if (poly.size() == 1) {
                 p->drawPoint(poly.first());
+            } else if (thin) {
+                p->drawPolyline(poly);
+            } else {
+                for (int i = 0; i + 1 < poly.size(); i += kLineChunk) {
+                    const int count = std::min(kLineChunk + 1, int(poly.size()) - i);
+                    if (s.compared) {
+                        pen.setDashOffset(dashLength / pen.widthF());
+                        p->setPen(pen);
+                        for (int k = i; k + 1 < i + count; ++k)
+                            dashLength += QLineF(poly.at(k), poly.at(k + 1)).length();
+                    }
+                    p->drawPolyline(poly.constData() + i, count);
+                }
+            }
             poly.clear();
         };
-        const bool decimate = !m_polar && s.x.size() > size_t(plot.width() * 2);
+        const bool decimate = !m_polar && s.x.size() > size_t(plot.width() * 2 / columnWidth);
         int col = std::numeric_limits<int>::min();
         qreal cMin = 0, cMax = 0, cLast = 0, cFirst = 0, cX = 0;
         auto emitColumn = [&]() {
@@ -864,20 +940,12 @@ void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) 
             if (cMax != cMin) poly << QPointF(cX, cMax);
             if (cLast != cMax) poly << QPointF(cX, cLast);
         };
-        for (size_t i = 0; i < s.x.size(); ++i) {
-            if (!std::isfinite(s.y[i]) || !std::isfinite(s.x[i])) {
-                emitColumn();
-                col = std::numeric_limits<int>::min();
-                flush();
-                continue;
-            }
-            const QPointF d = pointOf(s, i);
-            const QPointF q = toScreen(plot, view, d.x(), d.y());
+        auto addPoint = [&](const QPointF &q) {
             if (!decimate) {
                 poly << q;
-                continue;
+                return;
             }
-            const int c = int(std::floor(q.x()));
+            const int c = int(std::floor(q.x() / columnWidth));
             if (c != col) {
                 emitColumn();
                 col = c;
@@ -888,12 +956,40 @@ void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) 
                 cMax = std::max(cMax, q.y());
                 cLast = q.y();
             }
+        };
+        // За краем окна по X нужны только точки, соседние с окном: крупный план стоит как общий.
+        constexpr int kNoSide = 2;
+        int prevSide = kNoSide;
+        QPointF skipped;
+        bool haveSkipped = false;
+        for (size_t i = 0; i < s.x.size(); ++i) {
+            if (!std::isfinite(s.y[i]) || !std::isfinite(s.x[i])) {
+                emitColumn();
+                col = std::numeric_limits<int>::min();
+                flush();
+                prevSide = kNoSide;
+                haveSkipped = false;
+                continue;
+            }
+            const QPointF d = pointOf(s, i);
+            const QPointF q = toScreen(plot, view, d.x(), d.y());
+            const int side = m_polar ? 0 : q.x() < plot.left() ? -1 : q.x() > plot.right() ? 1 : 0;
+            if (side != 0 && side == prevSide) {
+                skipped = q;
+                haveSkipped = true;
+                continue;
+            }
+            if (haveSkipped)
+                addPoint(skipped);
+            haveSkipped = false;
+            addPoint(q);
+            prevSide = side;
         }
         emitColumn();
         flush();
 
         // Точки — если их немного (S-матрица на нескольких частотах).
-        if (s.x.size() <= 64) {
+        if (detail == LineDetail::Full && s.x.size() <= 64) {
             p->setPen(QPen(theme::bg(), 1.5));
             p->setBrush(color);
             for (size_t i = 0; i < s.x.size(); ++i) {
@@ -905,6 +1001,7 @@ void ChartBase::drawSeries(QPainter *p, const QRectF &plot, const QRectF &view) 
             p->setBrush(Qt::NoBrush);
         }
     }
+    p->setRenderHint(QPainter::Antialiasing, true);
 }
 
 void ChartBase::drawPick(QPainter *p, const QRectF &plot, const QRectF &view) const
