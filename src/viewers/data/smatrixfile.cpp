@@ -1,3 +1,7 @@
+/// @file smatrixfile.cpp
+/// @brief smatrixfile.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "smatrixfile.h"
 
 #include <QCoreApplication>

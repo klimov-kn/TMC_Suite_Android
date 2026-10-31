@@ -1,6 +1,7 @@
-// «TPL Designer» — встроенный конструктор заданий (решение M17, модуль TamicTplDesigner).
+// «TPL Designer» — встроенный конструктор заданий (, модуль TamicTplDesigner).
 // Сверху — папка задачи, куда пишется задание (её можно сменить); ниже — страница
 // конструктора. После записи можно сразу перейти к заданию на вкладке «Задачи».
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 import TamicTplDesigner
 
@@ -8,7 +9,7 @@ Item {
     id: screen
 
     property bool compact: false
-    property string folder: ""             // папка задачи (M16)
+    property string folder: ""             // папка задачи
     property string startOpts: ""          // параметры запуска (снимки): sample=<id>, card=<id>, library, step=<0..5>
     signal folderPicked(string folder)
     signal openTask(string folder, string name)

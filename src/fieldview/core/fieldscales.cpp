@@ -1,4 +1,7 @@
-// Шкалы поля в палитре проекта — описание в fieldscales.h.
+/// @file fieldscales.cpp
+/// @brief Шкалы поля в палитре проекта — описание в fieldscales.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldscales.h"
 #include "theme.h"
 #include "topology.h"

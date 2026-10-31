@@ -1,15 +1,18 @@
-// Файл топологии <имя>.tt (TOPOLOGY ядер) и границы блоков для показа.
-//
-// Перенос без изменений логики из Windows-версии FieldView:
-//   * CTmcBlockTpl::ReadData (src/win_src/fieldview/TmcBlockTpl.cpp) и
-//     CTmcRTH_BlockList::Load (src/win_src/libs/TMCIndan/TmcRTH_BolckList.cpp) — чтение;
-//   * CTmcBoundaryTpl::SetBlockList / SetRectStat / SetPolygonStat / SetCircleStat /
-//     SetInputX / SetInputY / TranslateX0Y0 (TmcBoundaryTpl.cpp) — четырёхугольники границ;
-//   * CFldViewView::ReadTpl, CalcnTopPolygon, PrepareBoundaryTpl (FldViewView.cpp) —
-//     нумерация портов («Inp N»), отбор видимых четырёхугольников, центры портов.
-//
-// Формат: строка-признак, список блоков (#BlockListBegin … #BlockListEnd), заголовок
-// (nT, Time, Delta, Xmin, Ymin, nX, nY), сетка ε (double), у X-моды ещё N, Y, B.
+/// @file topology.h
+/// @brief Файл топологии <имя>.tt (TOPOLOGY ядер) и границы блоков для показа.
+///
+/// Перенос без изменений логики из Windows-версии FieldView:
+///   * CTmcBlockTpl::ReadData (src/win_src/fieldview/TmcBlockTpl.cpp) и
+///     CTmcRTH_BlockList::Load (src/win_src/libs/TMCIndan/TmcRTH_BolckList.cpp) — чтение;
+///   * CTmcBoundaryTpl::SetBlockList / SetRectStat / SetPolygonStat / SetCircleStat /
+///     SetInputX / SetInputY / TranslateX0Y0 (TmcBoundaryTpl.cpp) — четырёхугольники границ;
+///   * CFldViewView::ReadTpl, CalcnTopPolygon, PrepareBoundaryTpl (FldViewView.cpp) —
+///     нумерация портов («Inp N»), отбор видимых четырёхугольников, центры портов.
+///
+/// Формат: строка-признак, список блоков (#BlockListBegin … #BlockListEnd), заголовок
+/// (nT, Time, Delta, Xmin, Ymin, nX, nY), сетка ε (double), у X-моды ещё N, Y, B.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #pragma once
 
 #include <QString>

@@ -1,4 +1,6 @@
-// TaskStore — папки задач и задания. См. taskstore.h.
+/// @file taskstore.cpp
+/// @brief TaskStore — папки задач и задания. См. taskstore.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#files
 
 #include "taskstore.h"
 
@@ -418,7 +420,7 @@ QString TaskStore::suggestMode(const QString &text, QString *reason)
     // (_B), частота соударений (_Y), в том числе из файла (FILE_N/_B/_Y). Их
     // понимает только ядро X (Include/Tmcgrviw.h, CTMCRTH_INDANBLCK_*STAT[NBY],
     // CTMCRTH_INDANBLCK_FILE[NBY]; макросы X-моды в Typerth.h). Однозначного
-    // признака моды в .tpl нет (вопрос В-2) — это подсказка, решение M22.
+    // признака моды в .tpl нет (вопрос В-2) — это подсказка.
     static const QRegularExpression re(
         QStringLiteral("\\b((?:RECT|CIRCLE|POLYGON)_STAT_[NBY]|FILE_[NBY])\\b"),
         QRegularExpression::CaseInsensitiveOption);

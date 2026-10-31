@@ -1,4 +1,7 @@
-// GifWriter — описание в gifwriter.h.
+/// @file gifwriter.cpp
+/// @brief GifWriter — описание в gifwriter.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "gifwriter.h"
 
 #include <QHash>

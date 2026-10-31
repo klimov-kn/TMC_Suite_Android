@@ -1,11 +1,15 @@
-// FieldRhiItem — сцена «Поле» на Qt RHI (QQuickRhiItem, решение M6):
-// Vulkan или OpenGL ES на Android, Direct3D/Vulkan/OpenGL на настольных.
-//
-// Сетка узлов (u, v) — в видеопамяти один раз; значения такта — буфер, обновляемый при
-// смене кадра; шкала — текстура 256×1. Рельеф, каркас, топология; перспектива 30°
-// (gluPerspective(30, …) оригинала). Надписи, шкала и кнопки — Qt Quick поверх
-// (FieldViewPage.qml). Вид (наклон, поворот, масштаб, сдвиг) — свойства элемента,
-// поэтому переживает поворот телефона.
+/// @file fieldrhiitem.h
+/// @brief FieldRhiItem — сцена «Поле» на Qt RHI (QQuickRhiItem):
+///
+/// Vulkan или OpenGL ES на Android, Direct3D/Vulkan/OpenGL на настольных.
+///
+/// Сетка узлов (u, v) — в видеопамяти один раз; значения такта — буфер, обновляемый при
+/// смене кадра; шкала — текстура 256×1. Рельеф, каркас, топология; перспектива 30°
+/// (gluPerspective(30, …) оригинала). Надписи, шкала и кнопки — Qt Quick поверх
+/// (FieldViewPage.qml). Вид (наклон, поворот, масштаб, сдвиг) — свойства элемента,
+/// поэтому переживает поворот телефона.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #pragma once
 
 #include "touchgesture.h"

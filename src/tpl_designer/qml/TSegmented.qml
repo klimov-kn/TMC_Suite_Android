@@ -1,5 +1,6 @@
 // Выбор одного из нескольких (как переключатель H/X оболочки): выбранный — accent.
 // options: [{key, label}]; columns — сколько в ряд (по умолчанию все в один ряд).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

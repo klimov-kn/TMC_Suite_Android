@@ -4,6 +4,7 @@
 // отдельным экраном («Свойства»). Горизонтально: инструменты колонкой слева, холст —
 // большая часть экрана, свойства — боковой панелью справа. Холст один и тот же при
 // любом положении: поворот не сбрасывает ни масштаб, ни выделение.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

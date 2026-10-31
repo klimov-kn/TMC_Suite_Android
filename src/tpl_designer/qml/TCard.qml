@@ -1,5 +1,6 @@
 // Карточка: фон surface, рамка line, скругление 14;
 // необязательный заголовок группы — цвет accent, как QGroupBox у TPL Designer.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

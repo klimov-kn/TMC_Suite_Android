@@ -1,5 +1,6 @@
 // «Справка»: о программе, язык интерфейса, руководство пользователя, память телефона,
 // лицензии. Руководство (ManualScreen) открывается поверх на весь экран.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Item {

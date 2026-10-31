@@ -1,5 +1,6 @@
 // Строка-переключатель во всю ширину: подпись, пояснение и флажок справа.
 // Касание по всей строке (не меньше 48 dp); включённый флажок — accent (style-guide).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

@@ -1,5 +1,9 @@
-// Разбор текстовых строк заголовков так же, как в Windows-версии (fgets + sscanf),
-// но без зависимости от локали: числа читаются как в локали "C".
+/// @file textscan.h
+/// @brief Разбор текстовых строк заголовков так же, как в Windows-версии (fgets + sscanf),
+///
+/// но без зависимости от локали: числа читаются как в локали "C".
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #pragma once
 
 #include <QByteArray>

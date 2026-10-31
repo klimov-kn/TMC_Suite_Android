@@ -1,6 +1,7 @@
 // Полоса хода расчёта: дорожка line, заполнение accent (или цвет итога).
 // indeterminate — идёт работа без процентов (подготовка задания): по дорожке бежит отрезок,
 // чтобы было видно, что приложение не зависло.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

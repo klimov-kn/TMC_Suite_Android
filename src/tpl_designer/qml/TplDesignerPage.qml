@@ -1,8 +1,8 @@
-// Встроенный TPL Designer (решение M17): задание .tpl собирается в приложении.
+// Встроенный TPL Designer: задание .tpl собирается в приложении.
 //
 // Шаги — как в настольном TPL Designer: «Задание» (расчёт) → «Геометрия» → «Объекты»
 // (материалы и источники) → «Вывод» → «Проверка» с кнопкой «Сгенерировать».
-// Шаги — вкладками сверху (M4), в любом порядке; замечания проверки видны на всех шагах.
+// Шаги — вкладками сверху, в любом порядке; замечания проверки видны на всех шагах.
 //
 // Работает и вертикально, и горизонтально (landscape = ширина больше высоты): в
 // горизонтальном положении холст занимает большую часть экрана, свойства — в боковой
@@ -12,6 +12,7 @@
 //
 // Подключение в оболочке:   import TamicTplDesigner
 //     TplDesignerPage { taskFolder: …; onSaved: (tplPath) => … }
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme
@@ -20,7 +21,7 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    /// Папка задачи (M16): сюда «Сгенерировать» кладёт .tpl и сопутствующие файлы.
+    /// Папка задачи: сюда «Сгенерировать» кладёт .tpl и сопутствующие файлы.
     property string taskFolder: ""
     /// Для папки content:// (Android SAF): объект с методом copyOut(localPath, folder, name).
     property QtObject exporter: null

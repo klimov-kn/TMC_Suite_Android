@@ -1,15 +1,19 @@
-// FieldScene — данные экрана «Поле» для QML: какие файлы есть в папке результатов,
-// серия тактов, текущий такт, слой (поле / ε / N / Y / B), шкала и её пределы,
-// топология. Рисует FieldRhiItem (fieldrhiitem.h), он берёт отсюда renderData().
-//
-// Обработка значений — как в CFldViewView::PrepareData / PrepareTpl / SetColor
-// Windows-версии (src/win_src/fieldview/FldViewView.cpp):
-//   высота h = 2·((v − zMin)/(zMax − zMin) − 0,5) ∈ [−1, 1] (ZtoGLWinCoord);
-//   цвет: обычный режим — (h + 1)/2, режим «Модуль» — |h| (SetColor);
-//   слои ε/N/Y/B — от минимума до максимума сетки (Z_EpstoGLWinCoord, SetColor_Eps).
-// Отличия (решение M27, ISSUES «О4»): пределы считаются заново для каждого кадра или
-// по всей серии, без «залипания» прошлых значений (С-57); шкала «Волна» симметрична
-// относительно нуля, чтобы ноль был тёмным (style-guide); min == max не делит на ноль (С-56).
+/// @file fieldscene.h
+/// @brief FieldScene — данные экрана «Поле» для QML: какие файлы есть в папке результатов,
+///
+/// серия тактов, текущий такт, слой (поле / ε / N / Y / B), шкала и её пределы,
+/// топология. Рисует FieldRhiItem (fieldrhiitem.h), он берёт отсюда renderData().
+///
+/// Обработка значений — как в CFldViewView::PrepareData / PrepareTpl / SetColor
+/// Windows-версии (src/win_src/fieldview/FldViewView.cpp):
+///   высота h = 2·((v − zMin)/(zMax − zMin) − 0,5) ∈ [−1, 1] (ZtoGLWinCoord);
+///   цвет: обычный режим — (h + 1)/2, режим «Модуль» — |h| (SetColor);
+///   слои ε/N/Y/B — от минимума до максимума сетки (Z_EpstoGLWinCoord, SetColor_Eps).
+/// Отличия: пределы считаются заново для каждого кадра или
+/// по всей серии, без «залипания» прошлых значений (С-57); шкала «Волна» симметрична
+/// относительно нуля, чтобы ноль был тёмным (style-guide); min == max не делит на ноль (С-56).
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #pragma once
 
 #include "fieldfile.h"

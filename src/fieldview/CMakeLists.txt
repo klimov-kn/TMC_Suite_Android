@@ -1,4 +1,4 @@
-# Просмотр поля (FieldView) на Qt RHI — этап О4, решение M6.
+# Просмотр поля (FieldView) на Qt RHI.
 #
 #   tamic_fieldview_core   — статическая библиотека (Qt Core): чтение .ex / .ex.frames /
 #                            .tt, границы топологии, запись тактов (FieldRecorder).
@@ -36,7 +36,7 @@ if(_fv_standalone)
     qt_policy(SET QTP0004 NEW)
 endif()
 
-# Ноль предупреждений (M14) — как в корневом CMakeLists.txt.
+# Ноль предупреждений — как в корневом CMakeLists.txt.
 if(NOT COMMAND tamic_set_warnings)
     function(tamic_set_warnings target)
         if(MSVC)

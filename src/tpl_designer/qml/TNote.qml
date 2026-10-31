@@ -1,4 +1,5 @@
 // Пояснение под полем: по умолчанию text-mute; level: "warn" | "danger" | "ok" | "dim".
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

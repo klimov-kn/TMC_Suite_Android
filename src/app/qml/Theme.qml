@@ -4,6 +4,7 @@
 // В экранах — только имена токенов (Theme.accent и т.п.), никаких "#…".
 // План (style-guide, «Как это устроено в коде»): на этапе О2 значения переедут
 // в src/ui/theme.h, а этот синглтон будет брать их из C++.
+// https://www.tamic.ru/docs/platforms/android.html#app
 pragma Singleton
 import QtQuick
 

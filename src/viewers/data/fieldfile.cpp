@@ -1,3 +1,7 @@
+/// @file fieldfile.cpp
+/// @brief fieldfile.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "fieldfile.h"
 
 #include "textscan.h"

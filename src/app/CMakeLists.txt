@@ -61,7 +61,7 @@ qt_add_qml_module(tamic
         ${TAMIC_DESKTOP_QML}
 )
 
-# Тексты лицензий — не исходники: lupdate их не читает (M28).
+# Тексты лицензий — не исходники: lupdate их не читает.
 set_property(TARGET tamic PROPERTY QT_EXCLUDE_SOURCES_FROM_TRANSLATION "fonts/*.txt")
 # Шрифты (SIL OFL 1.1, лицензии — fonts/*-OFL.txt) и встроенные примеры
 # (папка examples; копируются в «Примеры» при первом запуске).
@@ -135,7 +135,7 @@ set_target_properties(tamic PROPERTIES
     QT_ANDROID_VERSION_CODE ${TAMIC_VERSION_CODE}
     # Нативные библиотеки распаковываются при установке (useLegacyPackaging): ядра
     # libtmc_rt?.so должны лежать файлами в nativeLibraryDir, чтобы их можно было
-    # запустить процессом (решения A3, A13).
+    # запустить процессом.
     QT_ANDROID_LEGACY_PACKAGING TRUE
 )
 
@@ -143,7 +143,7 @@ target_compile_definitions(tamic PRIVATE TAMIC_VERSION_STRING="${TAMIC_VERSION_N
 target_link_libraries(tamic PRIVATE Qt6::Quick)
 if(ANDROID)
     target_link_libraries(tamic PRIVATE Qt6::CorePrivate log)
-    # Сегменты ELF по 16 КБ (Google Play, Android 15+; решение M33) — как у библиотек Qt.
+    # Сегменты ELF по 16 КБ (Google Play, Android 15+) — как у библиотек Qt.
     target_link_options(tamic PRIVATE -Wl,-z,max-page-size=16384)
 endif()
 tamic_set_warnings(tamic)
@@ -153,7 +153,7 @@ add_dependencies(tamic tamic_kernels)
 if(ANDROID)
     # В APK как нативные библиотеки lib*.so: Android 10+ запускает программы только
     # из nativeLibraryDir; QT_ANDROID_LEGACY_PACKAGING (выше) кладёт их туда
-    # файлами при установке (решения A3, A13).
+    # файлами при установке.
     set_property(TARGET tamic APPEND PROPERTY QT_ANDROID_EXTRA_LIBS
         ${TAMIC_KERNEL_OUT}/${TAMIC_KERNEL_FILE_H}
         ${TAMIC_KERNEL_OUT}/${TAMIC_KERNEL_FILE_X})

@@ -1,6 +1,7 @@
 // Вкладки: фон surface, активная вкладка — значок и подпись accent.
 // Вертикальное положение телефона — панель внизу; горизонтальное (vertical: true) —
 // боковая полоса слева, чтобы не отнимать и без того малую высоту экрана.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

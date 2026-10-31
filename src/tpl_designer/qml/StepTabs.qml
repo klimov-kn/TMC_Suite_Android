@@ -1,5 +1,6 @@
 // Вкладки шагов: номер и подпись; активная — accent (как активная вкладка оболочки).
 // Ширина делится поровну, у каждой вкладки касание не меньше 48 dp.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

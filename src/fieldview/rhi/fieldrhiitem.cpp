@@ -1,4 +1,7 @@
-// FieldRhiItem и его рендерер на QRhi — описание в fieldrhiitem.h.
+/// @file fieldrhiitem.cpp
+/// @brief FieldRhiItem и его рендерер на QRhi — описание в fieldrhiitem.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldrhiitem.h"
 #include "fieldscales.h"
 #include "fieldscene.h"

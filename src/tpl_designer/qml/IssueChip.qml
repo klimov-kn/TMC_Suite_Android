@@ -1,6 +1,7 @@
 // Счётчик замечаний проверки: ошибки — danger, предупреждения — warn, чисто — ok.
 // Касание ведёт на шаг «Проверка». Ошибку показываем там, где её сделали, —
 // на любом шаге, как список замечаний под страницей у настольного TPL Designer.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

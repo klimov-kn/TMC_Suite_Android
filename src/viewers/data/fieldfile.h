@@ -1,9 +1,12 @@
-// Файл распределения поля (.AMP, .FAZ — «#TMC_GraphicsOutputFieldFile»).
-//
-// Формат — как пишет ядро (src/win_src/libs/TMCIndan/FieldIntegrated.cpp): текстовый
-// заголовок из строк «#TMCGROFLD_<имя> <значение>», разделённых CR LF (после nY перевода
-// строки нет), затем nY строк: CR LF и nX чисел double (8 байт, little-endian).
-// Здесь только чтение (для этапа О4 «Поле» и сводки на экране «Результаты»).
+/// @file fieldfile.h
+/// @brief Файл распределения поля (.AMP, .FAZ — «#TMC_GraphicsOutputFieldFile»).
+///
+/// Формат — как пишет ядро (src/win_src/libs/TMCIndan/FieldIntegrated.cpp): текстовый
+/// заголовок из строк «#TMCGROFLD_<имя> <значение>», разделённых CR LF (после nY перевода
+/// строки нет), затем nY строк: CR LF и nX чисел double (8 байт, little-endian).
+/// Здесь только чтение (для экрана «Поле» и сводки на экране «Результаты»).
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #pragma once
 
 #include <QByteArray>

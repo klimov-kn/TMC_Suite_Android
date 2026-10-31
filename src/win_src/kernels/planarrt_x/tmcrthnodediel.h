@@ -171,10 +171,6 @@ public:
 	/// @return TRUE — узел посчитан здесь; FALSE — узел без поля или тип не по (7.55).
 	/// @see https://www.tamic.ru/docs/theory/boundaries.html#absorber
 	BOOL RunWallNodePlasma( _ELEM_VAL_RTH *prUNode1, _real *prYNode, int nX, TmcIdx i, int k );
-	/// @brief Б-8.2: есть ли в блоке ABSORBER/MAGNETIC узлы подмагниченной плазмы (тогда расчёт — на процессоре).
-	/// @param[in] prYNode коэффициенты узлов сетки (6 на узел; ячейка 3 = Y3, не 0 — в узле поле B)
-	/// @return TRUE — есть хотя бы один такой узел; FALSE — нет или блок другого типа.
-	BOOL HasMagnetizedWallNodes( _real *prYNode );
 	/// Б-8.2: история узлов (7.55) обнулена (первый подтакт шага).
 	BOOL m_bB82Init;
 	/// @brief Обновляет узлы порта на подтакте 0 (ячейки `prUNode1[6n + 0]`) и пишет строку

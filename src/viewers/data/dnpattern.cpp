@@ -1,6 +1,10 @@
-// Перенос c2DArray / cIzl (src/win_src/viewers/DiaNapr) — см. dnpattern.h.
-// Выражения и порядок операций оставлены как в оригинале; комментарии «// c2DArray::…»
-// указывают, откуда взят фрагмент.
+/// @file dnpattern.cpp
+/// @brief Перенос c2DArray / cIzl (src/win_src/viewers/DiaNapr) — см. dnpattern.h.
+///
+/// Выражения и порядок операций оставлены как в оригинале; комментарии «// c2DArray::…»
+/// указывают, откуда взят фрагмент.
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "dnpattern.h"
 
 #include "textscan.h"

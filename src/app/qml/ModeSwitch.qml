@@ -1,4 +1,5 @@
-// Переключатель ветки ядра H / X (решение M22): две половины, выбранная — accent.
+// Переключатель ветки ядра H / X: две половины, выбранная — accent.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

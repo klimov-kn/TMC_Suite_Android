@@ -1,4 +1,6 @@
-// Autotest — режим самопроверки. См. autotest.h.
+/// @file autotest.cpp
+/// @brief Autotest — режим самопроверки. См. autotest.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#kernels
 
 #include "autotest.h"
 

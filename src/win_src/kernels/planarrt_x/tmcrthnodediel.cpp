@@ -2471,14 +2471,6 @@ BOOL CTmcRTHNodeDiel::RunWallNodePlasma( _ELEM_VAL_RTH *prUNode1, _real *prYNode
 	return TRUE;
 }
 
-BOOL CTmcRTHNodeDiel::HasMagnetizedWallNodes( _real *prYNode )
-{
-	if( ( nType != CTMCRTH_BLCKNTYPE_ABSORBER )&&( nType != CTMCRTH_BLCKNTYPE_MAGNETIC ) ) return FALSE;
-	if( ( pcNodeDielOne == NULL )||( prYNode == NULL ) ) return FALSE;
-	for( TmcIdx i = 0; i < nNumNode; i++ )
-		if( ( pcNodeDielOne[i].nNodeGlobal >= 0 )&&( prYNode[ 6*pcNodeDielOne[i].nNodeGlobal + 3 ] != 0.0 ) ) return TRUE;
-	return FALSE;
-}
 
 void CTmcRTHNodeDiel::ExciteInputs( CTmcLibError &cError1, double dWT, double dT, _ELEM_VAL_RTH *pr1, int nX, CTmcRTH_IndanParam &cParam, double dtCurrent )
 {

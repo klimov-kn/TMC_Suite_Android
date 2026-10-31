@@ -1,5 +1,6 @@
 // Статус расчёта: не считалась — text-mute; идёт — accent;
 // готово — ok; ошибка — danger; остановлено — warn.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

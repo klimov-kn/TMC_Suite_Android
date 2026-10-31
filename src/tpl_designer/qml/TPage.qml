@@ -1,5 +1,6 @@
 // Прокручиваемая страница шага. Вертикально — карточки одной колонкой; горизонтально
 // (wide) — двумя: колонки заполняются по очереди, карточка задаёт ширину colWidth.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

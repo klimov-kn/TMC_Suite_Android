@@ -1,7 +1,11 @@
-// Комплексное число и функции модуля/фазы — перенос без изменений из библиотеки
-// complex Windows-версии (src/win_src/libs/complex/CMPLXALL.CPP: cabsv, cphase).
-// МАТЕМАТИКА НЕ ТРОНУТА: порядок операций и константы — как в оригинале (PI из
-// Include/Typedef.h). Фаза cphase — в диапазоне (−2π, 0], как у TMCGROUT.
+/// @file tmccomplex.h
+/// @brief Комплексное число и функции модуля/фазы — перенос без изменений из библиотеки
+///
+/// complex Windows-версии (src/win_src/libs/complex/CMPLXALL.CPP: cabsv, cphase).
+/// МАТЕМАТИКА НЕ ТРОНУТА: порядок операций и константы — как в оригинале (PI из
+/// Include/Typedef.h). Фаза cphase — в диапазоне (−2π, 0], как у TMCGROUT.
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #pragma once
 
 #include <algorithm>

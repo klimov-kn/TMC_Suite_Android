@@ -1,7 +1,8 @@
 // «Расчёт»: ход (шаг, такт, %), время, журнал ядра, «Остановить».
-// Данные — только из Calc (CalcSession) и Calc.runner (KernelRunner, M9): они живут в C++,
+// Данные — только из Calc (CalcSession) и Calc.runner (KernelRunner): они живут в C++,
 // поэтому поворот экрана и пересоздание экрана ход расчёта не теряют.
 // Широкий экран (горизонтальное положение): слева ход и кнопки, справа журнал.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Item {

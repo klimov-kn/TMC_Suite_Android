@@ -1,3 +1,7 @@
+/// @file geometrycanvas.cpp
+/// @brief geometrycanvas.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#designer
+
 #include "geometrycanvas.h"
 
 #include "designermodel.h"

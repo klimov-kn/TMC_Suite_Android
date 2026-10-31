@@ -1,5 +1,6 @@
 // Значки инструментов холста — линии, как значки вкладок оболочки (TabIcon.qml);
 // рисунки повторяют значки TPL Designer (mainwindow.cpp, toolIcon).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 import QtQuick.Shapes

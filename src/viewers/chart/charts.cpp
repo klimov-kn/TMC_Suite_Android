@@ -1,3 +1,7 @@
+/// @file charts.cpp
+/// @brief charts.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "charts.h"
 
 #include "../data/dnpattern.h"

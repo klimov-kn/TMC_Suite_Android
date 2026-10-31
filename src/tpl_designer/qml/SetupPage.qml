@@ -1,5 +1,6 @@
 // Шаг 1 «Задание»: имя, ядро H/X, счётная область, шаг сетки, время, частоты.
 // Поля — страница «Расчёт» настольного TPL Designer (mainwindow.cpp, buildSetupPage).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

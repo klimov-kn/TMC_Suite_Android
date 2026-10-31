@@ -1,5 +1,6 @@
 // Ползунок тактов: дорожка line, пройденная часть и ручка accent. Без Qt Quick Controls —
 // чтобы не зависеть от стиля оболочки.
+// https://www.tamic.ru/docs/platforms/android.html#field
 import QtQuick
 import TamicTplTheme
 

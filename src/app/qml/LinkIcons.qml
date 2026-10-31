@@ -2,6 +2,7 @@
 // eLibrary — те же, что в окне установщика Windows-версии (TMC_Suite/installer/TMC_Suite.iss).
 // Значки — простые знаки в палитре проекта: круг surface, рамка line,
 // знак text; нажатие — рамка accent. Касание открывает страницу в браузере.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 import QtQuick.Shapes
 

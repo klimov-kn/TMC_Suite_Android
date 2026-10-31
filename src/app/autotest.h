@@ -1,14 +1,18 @@
-// Autotest — режим самопроверки: считает встроенные примеры тем же путём, что и
-// человек (CalcSession: копирование в рабочую папку, KernelRunner, копирование
-// результатов обратно), и пишет итог в журнал (logcat, тег TAMIC) и в файл.
-//
-// Запуск:
-//   Android:  am start -n ru.tamic.app/org.qtproject.qt.android.bindings.QtActivity
-//             -e autotest voln_h|voln_x|horn_h|horn_x|plasma_x|all
-//   desktop:  tamic --autotest all
-// Папка задач самопроверки: <внешняя папка>/autotest/<случай>/ (Android —
-// /sdcard/Android/data/ru.tamic.app/files/autotest, её забирает «adb pull»);
-// отчёт — <данные>/autotest/report.txt и копия рядом с результатами.
+/// @file autotest.h
+/// @brief Autotest — режим самопроверки: считает встроенные примеры тем же путём, что и
+///
+/// человек (CalcSession: копирование в рабочую папку, KernelRunner, копирование
+/// результатов обратно), и пишет итог в журнал (logcat, тег TAMIC) и в файл.
+///
+/// Запуск:
+///   Android:  am start -n ru.tamic.app/org.qtproject.qt.android.bindings.QtActivity
+///             -e autotest voln_h|voln_x|horn_h|horn_x|plasma_x|all
+///   desktop:  tamic --autotest all
+/// Папка задач самопроверки: <внешняя папка>/autotest/<случай>/ (Android —
+/// /sdcard/Android/data/ru.tamic.app/files/autotest, её забирает «adb pull»);
+/// отчёт — <данные>/autotest/report.txt и копия рядом с результатами.
+/// @see https://www.tamic.ru/docs/platforms/android.html#kernels
+
 #pragma once
 
 #include <QElapsedTimer>

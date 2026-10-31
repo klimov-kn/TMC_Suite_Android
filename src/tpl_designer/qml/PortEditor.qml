@@ -1,6 +1,7 @@
 // Свойства порта (источника): сторона и апертура, активный/пассивный, мода, ε во
 // входе, сигнал формулой или файлом .sig. Поля — как в диалоге порта TPL Designer
 // (portdialog.cpp). INPUT_X / INPUT_Y и добавку ε − 1 выбирает программа, не человек.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

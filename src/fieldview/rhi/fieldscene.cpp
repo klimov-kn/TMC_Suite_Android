@@ -1,4 +1,7 @@
-// FieldScene — описание в fieldscene.h.
+/// @file fieldscene.cpp
+/// @brief FieldScene — описание в fieldscene.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldscene.h"
 
 #include <QDir>

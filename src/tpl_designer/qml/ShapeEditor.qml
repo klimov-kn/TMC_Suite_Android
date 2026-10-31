@@ -1,6 +1,7 @@
 // Свойства фигуры: имя, материал, eps, плазма (только X), размеры числами, стороны.
 // Поля — как в диалоге фигуры TPL Designer (shapedialog.cpp); правка уходит в модель
 // сразу (model.setShape), отмена — общей кнопкой «Отменить».
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

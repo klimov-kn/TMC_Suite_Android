@@ -1,5 +1,8 @@
-// Platform — настольная сборка (Windows, отладка). См. platform.h.
-// Папки — обычные пути, выбор — FolderDialog в QML; службы нет.
+/// @file platform_desktop.cpp
+/// @brief Platform — настольная сборка (Windows, отладка). См. platform.h.
+///
+/// Папки — обычные пути, выбор — FolderDialog в QML; службы нет.
+/// @see https://www.tamic.ru/docs/platforms/android.html#platform
 
 #include "platform.h"
 

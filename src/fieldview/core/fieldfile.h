@@ -1,23 +1,26 @@
-// Чтение файлов поля ядер TAMIC (FIELDS -> <имя>.ex, FIELD_DISTRIBUTION -> .AMP/.FAZ).
-//
-// Формат и разбор перенесены без изменений из Windows-версии FieldView
-// (src/win_src/fieldview/FldViewDoc.cpp: ReadDataParameters, ReadDataArray):
-//
-//   #TMC_GraphicsOutputFieldFile FormVer2.0 2000 \r\n
-//   #TMCGROFLD_nT <int>\r\n          #TMCGROFLD_Time <double>\r\n
-//   #TMCGROFLD_Delta <double>\r\n    #TMCGROFLD_Xmin <double>\r\n
-//   #TMCGROFLD_Ymin <double>\r\n     #TMCGROFLD_Accuracy <4|8>\r\n
-//   #TMCGROFLD_LongUnit <s> <double>\r\n  #TMCGROFLD_TimeUnit <s> <double>\r\n
-//   #TMCGROFLD_nX <int>\r\n          #TMCGROFLD_nY <int>
-//   затем nY строк: \r\n + nX значений float/double (порядок байт машины, x86/arm64 — LE).
-//
-// Строки заголовка сверяются по началу (strncmp), числа берутся как sscanf %d / %lg —
-// но без зависимости от локали (на Android Qt ставит локаль системы, а sscanf с
-// русской локалью ждёт запятую).
-//
-// «Серия тактов» <имя>.ex.frames — НЕ формат ядра: это подряд записанные копии файла
-// .ex, каждая байт в байт как у ядра (FieldRecorder, решение M25). Один файл .ex —
-// серия из одного такта.
+/// @file fieldfile.h
+/// @brief Чтение файлов поля ядер TAMIC (FIELDS -> <имя>.ex, FIELD_DISTRIBUTION -> .AMP/.FAZ).
+///
+/// Формат и разбор перенесены без изменений из Windows-версии FieldView
+/// (src/win_src/fieldview/FldViewDoc.cpp: ReadDataParameters, ReadDataArray):
+///
+///   #TMC_GraphicsOutputFieldFile FormVer2.0 2000 \r\n
+///   #TMCGROFLD_nT <int>\r\n          #TMCGROFLD_Time <double>\r\n
+///   #TMCGROFLD_Delta <double>\r\n    #TMCGROFLD_Xmin <double>\r\n
+///   #TMCGROFLD_Ymin <double>\r\n     #TMCGROFLD_Accuracy <4|8>\r\n
+///   #TMCGROFLD_LongUnit <s> <double>\r\n  #TMCGROFLD_TimeUnit <s> <double>\r\n
+///   #TMCGROFLD_nX <int>\r\n          #TMCGROFLD_nY <int>
+///   затем nY строк: \r\n + nX значений float/double (порядок байт машины, x86/arm64 — LE).
+///
+/// Строки заголовка сверяются по началу (strncmp), числа берутся как sscanf %d / %lg —
+/// но без зависимости от локали (на Android Qt ставит локаль системы, а sscanf с
+/// русской локалью ждёт запятую).
+///
+/// «Серия тактов» <имя>.ex.frames — НЕ формат ядра: это подряд записанные копии файла
+/// .ex, каждая байт в байт как у ядра (FieldRecorder). Один файл .ex —
+/// серия из одного такта.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #pragma once
 
 #include <QString>

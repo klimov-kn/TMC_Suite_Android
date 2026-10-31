@@ -1,5 +1,6 @@
 // Шаг 5 «Проверка»: замечания, сводка «что будет посчитано», текст файла .tpl и
 // главная кнопка «Сгенерировать». При ошибках файл не пишется — как у оригинала.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

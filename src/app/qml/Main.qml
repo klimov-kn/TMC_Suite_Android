@@ -8,6 +8,7 @@
 // Состояние (открытая папка и задание, вкладка) — свойства этого окна, ход расчёта — в C++
 // (Calc), поэтому поворот ничего не теряет (Android не пересоздаёт окно: configChanges).
 // Цвета, шрифты и размеры — только через Theme.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Window {

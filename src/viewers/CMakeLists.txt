@@ -1,10 +1,10 @@
-# Просмотр результатов (этап О3): S-матрица (TMCGROUT), ДН (TMC_DN), сигналы (TMCROS).
+# Просмотр результатов: S-матрица (TMCGROUT), ДН (TMC_DN), сигналы (TMCROS).
 #
 #   tamic_viewers_data   — чтение файлов .s / .t / .DAT / .AMP / .FAZ и обработка для
 #                          графиков (только Qt Core): перенос из Windows-вьюверов без изменения
 #                          математики.
 #   tamic_viewers        — QML-модуль Tamic.Viewers: SMatrixChart, PatternChart, SignalChart
-#                          (QQuickPaintedItem + QPainter, решение M5), ViewerTools.
+#                          (QQuickPaintedItem + QPainter), ViewerTools.
 #   tamic_viewers_module — подключение одной целью (статический плагин и его импорт,
 #                          import/viewers_import.cpp компилируется в приложении).
 # Оформление — src/ui/theme.h (значения из src/app/qml/Theme.qml, один источник).

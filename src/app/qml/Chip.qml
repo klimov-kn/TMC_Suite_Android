@@ -1,5 +1,6 @@
 // Небольшая кнопка-переключатель (вид оси графика, координаты): скругление 8 как у
 // кнопок-инструментов (style-guide), выбранная — фон accent, текст textOnAccent.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

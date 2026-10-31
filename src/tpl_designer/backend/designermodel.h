@@ -1,13 +1,14 @@
+/// @file designermodel.h
+/// @brief Модель встроенного TPL Designer для QML.
+///
+/// Держит одно задание tpl::Project — ту же модель, что и настольный TPL Designer, —
+/// и отдаёт его страницам в виде простых карт (QVariantMap). Синтаксиса .tpl здесь
+/// НЕТ: текст файла порождает только ядро генератора (emitMono / emitMacro /
+/// writeTask из tamic_tpl_core). Правила окна настольной версии, которые влияют на
+/// задание (сетка частот, окно снятия за временем счёта, частота согласования при
+/// сигнале из файла), перенесены сюда дословно — ссылки на mainwindow.cpp в комментариях.
+/// @see https://www.tamic.ru/docs/platforms/android.html#designer
 #pragma once
-
-// Модель встроенного TPL Designer для QML (этап 2B, решение M17).
-//
-// Держит одно задание tpl::Project — ту же модель, что и настольный TPL Designer, —
-// и отдаёт его страницам в виде простых карт (QVariantMap). Синтаксиса .tpl здесь
-// НЕТ: текст файла порождает только ядро генератора (emitMono / emitMacro /
-// writeTask из tamic_tpl_core). Правила окна настольной версии, которые влияют на
-// задание (сетка частот, окно снятия за временем счёта, частота согласования при
-// сигнале из файла), перенесены сюда дословно — ссылки на mainwindow.cpp в комментариях.
 
 #include "emitter.h"
 #include "project.h"
@@ -28,7 +29,7 @@ class TplDesignerModel : public QObject
     Q_OBJECT
     QML_NAMED_ELEMENT(DesignerModel)
 
-    /// Папка задачи (M16). Сюда «Сгенерировать» кладёт .tpl и сопутствующие файлы.
+    /// Папка задачи. Сюда «Сгенерировать» кладёт .tpl и сопутствующие файлы.
     Q_PROPERTY(QString taskFolder READ taskFolder WRITE setTaskFolder NOTIFY taskFolderChanged)
     /// Необязательный объект записи в папку, которую нельзя открыть QFile (Android SAF,
     /// content://): у него вызывается copyOut(localPath, folder, name) -> bool.
@@ -107,8 +108,6 @@ public:
     QVariantList selectedIds() const;
     /// Фигура выбрана (одна или в группе).
     bool isSelected(int id) const;
-    /// Выбранная группа; пусто, если выбрано не больше одной фигуры.
-    const QVector<int> &multi() const { return m_multi; }
     QVariantMap sampleCard() const { return m_card; }
     /// Задание карточки образца для картинки (SamplePreview).
     const tpl::Project &cardProject() const { return m_cardBuild.project; }
@@ -188,6 +187,10 @@ public:
     Q_INVOKABLE static QString num(double v);
     /// Разбор числа из поля: принимает и запятую. ok=false — не число.
     Q_INVOKABLE static QVariantMap parseNumber(const QString &text);
+
+protected:
+    /// Смена языка: тексты проверки и сводки считаются заново.
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 signals:
     void changed();

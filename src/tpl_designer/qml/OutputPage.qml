@@ -1,6 +1,7 @@
 // Шаг 4 «Вывод»: что выгружает ядро — сигналы, топология, поля, S-матрица, ДН.
 // Поля — страница «Вывод данных» настольного TPL Designer (buildOutputPage). Окно
 // снятия само едет за временем счёта (followTimeWindow в модели).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

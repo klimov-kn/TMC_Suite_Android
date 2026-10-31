@@ -1,5 +1,9 @@
-// Топология .tt и границы блоков — перенос логики Windows-версии FieldView
-// (ссылки на исходные функции — topology.h). Числа, порядок и условия — как в оригинале.
+/// @file topology.cpp
+/// @brief Топология .tt и границы блоков — перенос логики Windows-версии FieldView
+///
+/// (ссылки на исходные функции — topology.h). Числа, порядок и условия — как в оригинале.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "topology.h"
 #include "textscan.h"
 

@@ -1,4 +1,7 @@
-// FieldExporter — описание в fieldexporter.h.
+/// @file fieldexporter.cpp
+/// @brief FieldExporter — описание в fieldexporter.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldexporter.h"
 
 #include "fieldscene.h"

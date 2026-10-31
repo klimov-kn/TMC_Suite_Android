@@ -1,6 +1,9 @@
-// Platform — Android. См. platform.h.
-// Java-часть: platforms/android/src/ru/tamic/app/TamicBridge.java (SAF, «Поделиться»,
-// экстры запуска) и CalcService.java (служба переднего плана, П3).
+/// @file platform_android.cpp
+/// @brief Platform — Android. См. platform.h.
+///
+/// Java-часть: platforms/android/src/ru/tamic/app/TamicBridge.java (SAF, «Поделиться»,
+/// экстры запуска) и CalcService.java (служба переднего плана, П3).
+/// @see https://www.tamic.ru/docs/platforms/android.html#platform
 
 #include "platform.h"
 

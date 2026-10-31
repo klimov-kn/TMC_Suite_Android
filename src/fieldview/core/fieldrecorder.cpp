@@ -1,4 +1,7 @@
-// Запись серии тактов поля — описание в fieldrecorder.h.
+/// @file fieldrecorder.cpp
+/// @brief Запись серии тактов поля — описание в fieldrecorder.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldrecorder.h"
 #include "fieldfile.h"
 
@@ -46,7 +49,7 @@ bool readStable(const QString &path, QByteArray *out)
     return ok;
 #else
     // Android, Linux, macOS: ядро (compat tmc_fopen) пишет кадр во временный файл и
-    // подменяет им файл поля переименованием (ISSUES П-10) — открытый здесь файл
+    // подменяет им файл поля переименованием — открытый здесь файл
     // всегда цельный кадр, ядро при этом не ждёт.
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))

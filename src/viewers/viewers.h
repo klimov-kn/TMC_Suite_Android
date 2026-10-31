@@ -1,8 +1,11 @@
-// Модуль просмотра результатов (этап О3): S-матрица, ДН, сигналы.
-//
-// Чтение файлов — data/ (форматы и обработка — перенос из Windows-вьюверов без изменений
-// математики), рисование — chart/ (QQuickPaintedItem + QPainter, оформление — src/ui/theme.h).
-// QML-модуль Tamic.Viewers: SMatrixChart, PatternChart, SignalChart.
+/// @file viewers.h
+/// @brief Модуль просмотра результатов: S-матрица, ДН, сигналы.
+///
+/// Чтение файлов — data/ (форматы и обработка — перенос из Windows-вьюверов без изменений
+/// математики), рисование — chart/ (QQuickPaintedItem + QPainter, оформление — src/ui/theme.h).
+/// QML-модуль Tamic.Viewers: SMatrixChart, PatternChart, SignalChart.
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #pragma once
 
 #include <QByteArray>
@@ -21,7 +24,7 @@ void setFileReader(FileReader reader);
 FileReader fileReader();
 
 // Десятичный знак в подписях графиков: запятая (русский интерфейс) или точка
-// (английский). Задаёт оболочка при выборе языка (Language, решение M28); заодно
+// (английский). Задаёт оболочка при выборе языка (Language); заодно
 // графики перестраивают подписи (сигнал languageNotifier()->changed).
 void setDecimalComma(bool comma);
 bool decimalComma();
@@ -37,7 +40,7 @@ LanguageNotifier *languageNotifier();
 QString localizeNumber(QString s);
 
 // Вид графика по имени файла: "smatrix" (.s), "pattern" (.DAT), "signal" (.t),
-// "field" (.ex, .ex.frames, .AMP, .FAZ, .tt — поле, этап О4), пусто — не график.
+// "field" (.ex, .ex.frames, .AMP, .FAZ, .tt — поле,), пусто — не график.
 QString chartKind(const QString &fileName);
 
 } // namespace viewers

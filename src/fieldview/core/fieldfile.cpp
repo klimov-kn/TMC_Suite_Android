@@ -1,6 +1,10 @@
-// Чтение файлов поля — перенос CFldViewDoc::ReadDataParameters / ReadDataArray
-// (src/win_src/fieldview/FldViewDoc.cpp) и цикла размаха из CFldViewView::PrepareData.
-// Подробности формата — fieldfile.h.
+/// @file fieldfile.cpp
+/// @brief Чтение файлов поля — перенос CFldViewDoc::ReadDataParameters / ReadDataArray
+///
+/// (src/win_src/fieldview/FldViewDoc.cpp) и цикла размаха из CFldViewView::PrepareData.
+/// Подробности формата — fieldfile.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#field
+
 #include "fieldfile.h"
 #include "textscan.h"
 

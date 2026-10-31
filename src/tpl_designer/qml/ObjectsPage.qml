@@ -1,6 +1,7 @@
 // Шаг 3 «Объекты»: фигуры (материалы, eps, плазма) и порты (источники) списком.
 // Вертикально: список, касание открывает свойства отдельным экраном. Горизонтально:
 // список слева, свойства справа (список — подробность).
+// https://www.tamic.ru/docs/platforms/android.html#designer
 pragma ComponentBehavior: Bound
 import QtQuick
 import TamicTplTheme

@@ -1,3 +1,7 @@
+/// @file designermodel.cpp
+/// @brief designermodel.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#designer
+
 #include "designermodel.h"
 
 #include "cp1251.h"
@@ -8,6 +12,7 @@
 #include "tplreader.h"
 
 #include <QCoreApplication>
+#include <QEvent>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -25,7 +30,7 @@ using namespace tpl;
 namespace {
 
 /// «5 частот» на языке интерфейса: русские три формы (plural из ядра) или английская
-/// пара «1 task / 2 tasks» (слова уже переведены, решение M28).
+/// пара «1 task / 2 tasks» (слова уже переведены).
 QString uiPlural(int n, const QString &one, const QString &few, const QString &many)
 {
     if (QLocale().language() == QLocale::Russian)
@@ -254,6 +259,14 @@ TplDesignerModel::TplDesignerModel(QObject *parent)
     : QObject(parent)
 {
     newProject();
+    QCoreApplication::instance()->installEventFilter(this);
+}
+
+bool TplDesignerModel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::LanguageChange)
+        refresh();
+    return QObject::eventFilter(watched, event);
 }
 
 void TplDesignerModel::newProject()

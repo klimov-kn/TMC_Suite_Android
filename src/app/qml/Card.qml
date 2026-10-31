@@ -1,5 +1,6 @@
 // Карточка: фон surface, рамка line, скругление 14.
 // Содержимое кладётся в колонку с отступом padding.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

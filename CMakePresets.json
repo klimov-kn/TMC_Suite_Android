@@ -1,6 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -18,15 +22,12 @@
     },
     {
       "name": "desktop",
-      "displayName": "Windows, MinGW 13.1 (отладка)",
+      "displayName": "Linux, g++ (отладка интерфейса и ядер без телефона)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "$env{QT_ROOT}/mingw_64",
-        "CMAKE_CXX_COMPILER": "$env{QT_TOOLS}/mingw1310_64/bin/g++.exe"
-      },
-      "environment": {
-        "PATH": "$env{QT_TOOLS}/mingw1310_64/bin;$env{QT_ROOT}/mingw_64/bin;$penv{PATH}"
+        "CMAKE_PREFIX_PATH": "$penv{HOME}/Qt/6.11.1/gcc_64",
+        "CMAKE_MAKE_PROGRAM": "ninja"
       }
     },
     {
@@ -49,8 +50,7 @@
     },
     {
       "name": "android-arm64-release",
-      "displayName": "Android arm64-v8a, выпуск: пакет AAB для Google Play",
-      "description": "Release; пакет .aab (цель aab). Подпись — переменными QT_ANDROID_KEYSTORE_* и -DQT_ANDROID_SIGN_AAB=ON (ключ вне проекта, M33).",
+      "displayName": "Android arm64-v8a, выпуск: APK и AAB",
       "inherits": "android-arm64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -58,8 +58,8 @@
     },
     {
       "name": "kernels-android-arm64",
-      "displayName": "Ядра tmc_rth/tmc_rtx: Android arm64-v8a (API 28), консольные PIE",
-      "description": "Только src/kernels (без Qt), NDK clang. Запуск через adb shell в /data/local/tmp/tamic (этап П1).",
+      "displayName": "Ядра tmc_rth и tmc_rtx: Android arm64-v8a (API 28)",
+      "description": "Только src/kernels, без Qt: ядра для запуска через adb.",
       "inherits": "base",
       "binaryDir": "${sourceDir}/build/kernels-android",
       "environment": {
@@ -77,9 +77,27 @@
     }
   ],
   "buildPresets": [
-    { "name": "desktop", "configurePreset": "desktop" },
-    { "name": "android-arm64", "configurePreset": "android-arm64", "targets": [ "apk" ] },
-    { "name": "android-arm64-release", "configurePreset": "android-arm64-release", "targets": [ "aab" ] },
-    { "name": "kernels-android-arm64", "configurePreset": "kernels-android-arm64" }
+    {
+      "name": "desktop",
+      "configurePreset": "desktop"
+    },
+    {
+      "name": "android-arm64",
+      "configurePreset": "android-arm64",
+      "targets": [
+        "apk"
+      ]
+    },
+    {
+      "name": "android-arm64-release",
+      "configurePreset": "android-arm64-release",
+      "targets": [
+        "aab"
+      ]
+    },
+    {
+      "name": "kernels-android-arm64",
+      "configurePreset": "kernels-android-arm64"
+    }
   ]
 }

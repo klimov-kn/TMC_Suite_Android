@@ -1,5 +1,6 @@
 // Строка списка: заголовок, подпись, справа — статус или действие, «›».
 // Нажатие — фон surface-2, рамка accent (как у кнопок).
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Rectangle {

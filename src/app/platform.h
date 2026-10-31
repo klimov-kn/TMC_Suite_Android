@@ -1,9 +1,13 @@
-// Platform — узкое место платформенных различий («различия платформ —
-// только в platforms/<платформа>/ и за #ifdef в узких местах»).
-//
-// Android: platform_android.cpp + platforms/android/src/ru/tamic/app/*.java
-//   (выбор папки SAF, доступ к её файлам, «Поделиться», служба расчёта).
-// Настольная сборка: platform_desktop.cpp (обычные папки; служба не нужна).
+/// @file platform.h
+/// @brief Platform — узкое место платформенных различий («различия платформ —
+///
+/// только в platforms/<платформа>/ и за #ifdef в узких местах»).
+///
+/// Android: platform_android.cpp + platforms/android/src/ru/tamic/app/*.java
+///   (выбор папки SAF, доступ к её файлам, «Поделиться», служба расчёта).
+/// Настольная сборка: platform_desktop.cpp (обычные папки; служба не нужна).
+/// @see https://www.tamic.ru/docs/platforms/android.html#platform
+
 #pragma once
 
 #include <QByteArray>

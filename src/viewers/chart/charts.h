@@ -1,8 +1,12 @@
-// Три вида графиков результатов (этап О3):
-//   SMatrixChart — элементы S-матрицы по частоте (как TMCGROUT, файл .s);
-//   PatternChart — диаграмма направленности и КНД (как TMC_DN, файл .DAT);
-//   SignalChart  — сигналы на портах во времени (как TMCROS, файл .t).
-// Формулы осей Y — перенос из Windows-вьюверов (PrepareDoubleGraph), см. .cpp.
+/// @file charts.h
+/// @brief Три вида графиков результатов:
+///
+///   SMatrixChart — элементы S-матрицы по частоте (как TMCGROUT, файл .s);
+///   PatternChart — диаграмма направленности и КНД (как TMC_DN, файл .DAT);
+///   SignalChart  — сигналы на портах во времени (как TMCROS, файл .t).
+/// Формулы осей Y — перенос из Windows-вьюверов (PrepareDoubleGraph), см. .cpp.
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #pragma once
 
 #include "chartbase.h"

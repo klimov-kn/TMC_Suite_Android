@@ -1,4 +1,6 @@
-// CalcSession — один расчёт задачи. См. calcsession.h.
+/// @file calcsession.cpp
+/// @brief CalcSession — один расчёт задачи. См. calcsession.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#kernels
 
 #include "calcsession.h"
 
@@ -81,7 +83,7 @@ bool CalcSession::start(const QString &folder, const QString &task, const QStrin
     m_snapshot.clear();
     m_lastNotifyMs = 0;
     m_runner.clearLog();
-    store->setMode(folder, task, m_mode);   // выбор запоминается для задачи (M22)
+    store->setMode(folder, task, m_mode);   // выбор запоминается для задачи
 
     if (interactive)
         Platform::requestNotificationPermission();
@@ -137,7 +139,7 @@ void CalcSession::onProgress()
 {
     if (m_phase != QLatin1String("running"))
         return;
-    // Тактов в шаге — запись поля берёт кадры равномерно по ним (M26).
+    // Тактов в шаге — запись поля берёт кадры равномерно по ним.
     m_recorder.setExpectedTicks(m_runner.tickMax());
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (now - m_lastNotifyMs < 1000)    // уведомление — не чаще раза в секунду

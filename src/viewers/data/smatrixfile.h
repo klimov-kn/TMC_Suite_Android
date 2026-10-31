@@ -1,10 +1,13 @@
-// Файл S-матрицы (.s, «SMT 102») — чтение, как в TMCGROUT.
-//
-// Формат и порядок чтения — src/win_src/libs/SFILE95/Read_s.cpp (read_S_matrix) и
-// S_FILE.CPP (read_S, skip_string); выбор элемента — S_remt.cpp
-// (read_S_matrix_element_TMC). Двоичные поля little-endian: WORD и INT_1 (= short) — 2 байта,
-// int — 4, double — 8. Файлы HFSS/CST (запасные ветки read_S_matrix_element) — не
-// поддерживаются: их ядро не пишет.
+/// @file smatrixfile.h
+/// @brief Файл S-матрицы (.s, «SMT 102») — чтение, как в TMCGROUT.
+///
+/// Формат и порядок чтения — src/win_src/libs/SFILE95/Read_s.cpp (read_S_matrix) и
+/// S_FILE.CPP (read_S, skip_string); выбор элемента — S_remt.cpp
+/// (read_S_matrix_element_TMC). Двоичные поля little-endian: WORD и INT_1 (= short) — 2 байта,
+/// int — 4, double — 8. Файлы HFSS/CST (запасные ветки read_S_matrix_element) — не
+/// поддерживаются: их ядро не пишет.
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #pragma once
 
 #include "tmccomplex.h"

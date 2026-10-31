@@ -1,3 +1,7 @@
+/// @file chartbase.cpp
+/// @brief chartbase.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "chartbase.h"
 
 #include "theme.h"

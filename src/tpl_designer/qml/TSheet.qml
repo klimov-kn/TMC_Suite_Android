@@ -1,5 +1,6 @@
 // Лист поверх страницы: затемнение, панель surface со скруглением, заголовок,
 // прокручиваемое содержимое и кнопки внизу. Касание по затемнению — закрыть.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

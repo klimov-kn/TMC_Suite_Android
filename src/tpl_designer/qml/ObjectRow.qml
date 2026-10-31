@@ -1,5 +1,6 @@
 // Строка списка объектов: цветная метка материала, имя и описание. Выбранная —
 // фон line, имя accent.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

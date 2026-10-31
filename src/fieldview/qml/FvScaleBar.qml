@@ -1,5 +1,6 @@
 // Цветовая шкала поверх сцены: полоса цветов шкалы («Волна» или «Свечение») снизу вверх,
 // подписи максимума, середины и минимума (числа — JetBrains Mono).
+// https://www.tamic.ru/docs/platforms/android.html#field
 import QtQuick
 import TamicTplTheme
 

@@ -1,4 +1,6 @@
-// AppInfo — сведения для «Справки». См. appinfo.h.
+/// @file appinfo.cpp
+/// @brief AppInfo — сведения для «Справки». См. appinfo.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#app
 
 #include "appinfo.h"
 

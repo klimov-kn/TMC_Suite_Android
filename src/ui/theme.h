@@ -1,9 +1,12 @@
-// Оформление TAMIC для C++ (графики QPainter и т.п.).
-//
-// Значения НЕ записаны здесь: они берутся из src/app/qml/Theme.qml (тот же файл, что
-// у экранов QML и у модуля TPL Designer). CMake при настройке читает Theme.qml и пишет
-// tamic_theme_tokens.h (src/ui/theme_tokens.cmake) — источник правды один.
-// Имена функций — как в TPL_Designer/src/gui/theme.h (theme::bg(), theme::accent() …).
+/// @file theme.h
+/// @brief Оформление TAMIC для C++ (графики QPainter и т.п.).
+///
+/// Значения НЕ записаны здесь: они берутся из src/app/qml/Theme.qml (тот же файл, что
+/// у экранов QML и у модуля TPL Designer). CMake при настройке читает Theme.qml и пишет
+/// tamic_theme_tokens.h (src/ui/theme_tokens.cmake) — источник правды один.
+/// Имена функций — как в TPL_Designer/src/gui/theme.h (theme::bg(), theme::accent() …).
+/// @see https://www.tamic.ru/docs/platforms/android.html#app
+
 #pragma once
 
 #include "tamic_theme_tokens.h"

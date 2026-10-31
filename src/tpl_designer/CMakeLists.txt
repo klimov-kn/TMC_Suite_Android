@@ -1,4 +1,4 @@
-# Встроенный TPL Designer (решение M17, этап 2B): создание задания .tpl в приложении.
+# Встроенный TPL Designer: создание задания .tpl в приложении.
 #
 #   tamic_tpl_core       — статическая библиотека, ядро генератора из
 #                          ..\TPL_Designer\src\core (Qt Core, без Widgets). Логика
@@ -19,7 +19,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(TamicTplDesigner VERSION 0.1.0 LANGUAGES CXX)
+    project(TamicTplDesigner VERSION 2.0.0 LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
@@ -34,7 +34,7 @@ if(_tpld_standalone)
     qt_policy(SET QTP0004 NEW)
 endif()
 
-# Ноль предупреждений (M14). В составе приложения функция задана корневым
+# Ноль предупреждений. В составе приложения функция задана корневым
 # CMakeLists.txt; при самостоятельной сборке — здесь, тем же содержимым.
 if(NOT COMMAND tamic_set_warnings)
     function(tamic_set_warnings target)
@@ -85,6 +85,7 @@ add_library(tamic_tpl_core STATIC
     # Авторские учебные задания (CP1251, байт в байт): Q_INIT_RESOURCE(lessons).
     core/samples/lessons.qrc
 )
+# Тексты ядра переводит tpl::tr(ru, en), им не нужен файл перевода Qt.
 set_target_properties(tamic_tpl_core PROPERTIES AUTORCC ON AUTOMOC OFF AUTOUIC OFF)
 target_include_directories(tamic_tpl_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core
@@ -182,6 +183,7 @@ qt_add_qml_module(tamic_tpl_designer
 )
 target_include_directories(tamic_tpl_designer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backend)
 target_link_libraries(tamic_tpl_designer PUBLIC tamic_tpl_core tamic_tpl_theme Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+set_property(TARGET tamic_tpl_designer APPEND PROPERTY QT_EXCLUDE_SOURCES_FROM_TRANSLATION "backend/designerextras.cpp")
 tamic_set_warnings(tamic_tpl_designer)
 
 # Подключение одной целью: статические плагины обоих модулей и их импорт

@@ -1,25 +1,27 @@
-// TAMIC — точка входа приложения (общая для Android и настольной сборки).
-//
-// Параметры запуска (настольная сборка — ключи командной строки; Android — экстры
-// интента: am start -n ru.tamic.app/org.qtproject.qt.android.bindings.QtActivity -e …):
-//   autotest <случаи>  — самопроверка: voln_h, voln_x, horn_h, horn_x, plasma_x или all
-//                        (autotest.h); на ПК приложение закрывается с кодом 0/1;
-//   screen <экран>     — открыть экран: folders, tasks, task, run, results, designer, about, manual
-//                        (для снимков экрана, нажимать на телефоне нельзя);
-//   task <пример>      — задача для экранов tasks/task/results: voln, horn, plasma_nby;
-//   chart <файл>       — (с screen results) открыть график: имя файла результатов задачи
-//                        или полный путь к файлу на ПК (.s, .DAT, .t);
-//   chart-opts <ключи> — вид графика через запятую: db, polar, mode=N, pick (максимум),
-//                        all (все ряды), cmp / cmpsheet (сравнение) — для снимков без касаний;
-//                        с screen results без chart: delete (лист удаления), filemenu=<файл>;
-//                        с screen designer: sample=<образец>, step=<0..4>;
-//   screenshot <файл>  — (только ПК) снимок окна и выход;
-//   window-size WxH    — (только ПК) размер окна, напр. 360x780 / 780x360 (+ QT_SCALE_FACTOR=3);
-//   lang ru|en         — язык только на этот запуск (снимки руководства), выбор не меняется;
-//   calc <пример>[:H|X] — посчитать пример из «Примеров» (voln, horn, plasma_nby, voln_field,
-//                        eps4) или задание по пути (ПК: папка добавляется в «Задачи»);
-//   frameBudgetMb, frameMax — (Android) пределы записи тактов поля для съёмки видео;
-//                        на ПК без screenshot приложение закрывается с кодом ядра.
+/// @file main.cpp
+/// @brief TAMIC — точка входа приложения (общая для Android и настольной сборки).
+///
+/// Параметры запуска (настольная сборка — ключи командной строки; Android — экстры
+/// интента: am start -n ru.tamic.app/org.qtproject.qt.android.bindings.QtActivity -e …):
+///   autotest <случаи>  — самопроверка: voln_h, voln_x, horn_h, horn_x, plasma_x или all
+///                        (autotest.h); на ПК приложение закрывается с кодом 0/1;
+///   screen <экран>     — открыть экран: folders, tasks, task, run, results, designer, about, manual
+///                        (для снимков экрана, нажимать на телефоне нельзя);
+///   task <пример>      — задача для экранов tasks/task/results: voln, horn, plasma_nby;
+///   chart <файл>       — (с screen results) открыть график: имя файла результатов задачи
+///                        или полный путь к файлу на ПК (.s, .DAT, .t);
+///   chart-opts <ключи> — вид графика через запятую: db, polar, mode=N, pick (максимум),
+///                        all (все ряды), cmp / cmpsheet (сравнение) — для снимков без касаний;
+///                        с screen results без chart: delete (лист удаления), filemenu=<файл>;
+///                        с screen designer: sample=<образец>, step=<0..4>;
+///   screenshot <файл>  — (только ПК) снимок окна и выход;
+///   window-size WxH    — (только ПК) размер окна, напр. 360x780 / 780x360 (+ QT_SCALE_FACTOR=3);
+///   lang ru|en         — язык только на этот запуск (снимки руководства), выбор не меняется;
+///   calc <пример>[:H|X] — посчитать пример из «Примеров» (voln, horn, plasma_nby, voln_field,
+///                        eps4) или задание по пути (ПК: папка добавляется в «Задачи»);
+///   frameBudgetMb, frameMax — (Android) пределы записи тактов поля для съёмки видео;
+///                        на ПК без screenshot приложение закрывается с кодом ядра.
+/// @see https://www.tamic.ru/docs/platforms/android.html#app
 
 #include "autotest.h"
 #include "calcsession.h"
@@ -151,7 +153,7 @@ int main(int argc, char *argv[])
     QGuiApplication::setFont(uiFont);
 
     Platform::instance();   // Android: регистрация JNI-вызовов до первого расчёта
-    Language::instance()->init(lang);   // сохранённый язык или язык системы (M28)
+    Language::instance()->init(lang);   // сохранённый язык или язык системы
     TaskStore::instance()->installExamples();
     // Графики (src/viewers) читают файлы задачи тем же путём, что и расчёт (SAF на Android).
     viewers::setFileReader([](const QString &folder, const QString &name) {

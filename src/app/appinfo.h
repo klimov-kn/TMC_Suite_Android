@@ -1,6 +1,10 @@
-// AppInfo — сведения для «Справки»: версия Qt, тексты лицензий шрифтов, руководство
-// пользователя на языке интерфейса (ресурсы :/manual/<язык>.json, снимки экрана —
-// :/manual/<язык>/*.png; источник — src/app/manual).
+/// @file appinfo.h
+/// @brief AppInfo — сведения для «Справки»: версия Qt, тексты лицензий шрифтов, руководство
+///
+/// пользователя на языке интерфейса (ресурсы :/manual/<язык>.json, снимки экрана —
+/// :/manual/<язык>/*.png; источник — src/app/manual).
+/// @see https://www.tamic.ru/docs/platforms/android.html#app
+
 #pragma once
 
 #include <QObject>

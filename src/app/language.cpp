@@ -1,6 +1,10 @@
-// Language — язык интерфейса. См. language.h.
+/// @file language.cpp
+/// @brief Language — язык интерфейса. См. language.h.
+/// @see https://www.tamic.ru/docs/platforms/android.html#app
 
 #include "language.h"
+
+#include "lang.h"
 
 #include "platform.h"
 #include "viewers.h"
@@ -92,6 +96,7 @@ void Language::apply(const QString &code)
         }
     }
     m_code = code;
+    tpl::setEnglish(code == QLatin1String("en"));
     QLocale::setDefault(QLocale(code == QLatin1String("ru") ? QLocale::Russian : QLocale::English));
     viewers::setDecimalComma(code == QLatin1String("ru"));
     Platform::setLanguage(code);

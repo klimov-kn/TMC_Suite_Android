@@ -1,6 +1,7 @@
 // Кнопка в стиле проекта, как
 // TamicButton оболочки: обычная — фон surface, рамка line, нажатие — рамка accent;
 // главная (primary) — фон accent, текст textOnAccent; опасная (danger) — текст и рамка danger.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 import QtQuick.Templates as T

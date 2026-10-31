@@ -1,4 +1,5 @@
 // Значки нижних вкладок — линии; цвет задаёт вкладка (accent / text-mute).
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 import QtQuick.Shapes
 

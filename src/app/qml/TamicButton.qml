@@ -3,6 +3,7 @@
 //  - главная (primary: true, одна на экран): фон accent, текст textOnAccent, жирный;
 //  - опасная (danger: true): текст и рамка danger.
 // Построена на QtQuick.Templates — без чужого стиля (Material и т.п.).
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 import QtQuick.Templates as T
 

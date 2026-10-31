@@ -1,4 +1,5 @@
 // Переключатель-«чип» панели «Поле»: включён — рамка и текст accent, фон surface-2.
+// https://www.tamic.ru/docs/platforms/android.html#field
 import QtQuick
 import TamicTplTheme
 

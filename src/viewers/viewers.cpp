@@ -1,3 +1,7 @@
+/// @file viewers.cpp
+/// @brief viewers.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "viewers.h"
 
 #include <QDir>
@@ -57,7 +61,7 @@ QString chartKind(const QString &fileName)
 {
     const QString ext = QFileInfo(fileName).suffix().toLower();
     // Поле: мгновенное (.ex), серия тактов (.ex.frames), распределение (.AMP/.FAZ),
-    // топология (.tt) — всё открывает экран «Поле» (этап О4).
+    // топология (.tt) — всё открывает экран «Поле».
     if (ext == QLatin1String("ex") || ext == QLatin1String("tt")
         || fileName.endsWith(QLatin1String(".ex.frames"), Qt::CaseInsensitive))
         return QStringLiteral("field");

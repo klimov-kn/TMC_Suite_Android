@@ -1,4 +1,5 @@
 // Кнопка инструмента: значок и подпись, не меньше 48×48 dp. Выбранная — фон accent.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 

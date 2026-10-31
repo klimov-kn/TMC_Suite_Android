@@ -1,4 +1,5 @@
 // «Задачи», второй уровень: задания .tpl выбранной папки, статус последнего расчёта.
+// https://www.tamic.ru/docs/platforms/android.html#app
 import QtQuick
 
 Item {

@@ -1,5 +1,6 @@
 // Панель управления экрана «Поле»: такты (пуск/пауза, шаг, ползунок, скорость),
 // слой (поле / ε / N / Y / B), вид (рельеф, каркас, топология, модуль, шкала), файл.
+// https://www.tamic.ru/docs/platforms/android.html#field
 import QtQuick
 import TamicTplTheme
 

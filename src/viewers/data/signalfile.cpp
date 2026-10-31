@@ -1,3 +1,7 @@
+/// @file signalfile.cpp
+/// @brief signalfile.cpp
+/// @see https://www.tamic.ru/docs/platforms/android.html#charts
+
 #include "signalfile.h"
 
 #include "textscan.h"

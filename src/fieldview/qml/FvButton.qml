@@ -1,5 +1,6 @@
 // Кнопка-значок панели «Поле»: главная (accent) или обычная (surface + рамка line).
 // Значки рисуются фигурами, без шрифтов: play, pause, prev, next.
+// https://www.tamic.ru/docs/platforms/android.html#field
 import QtQuick
 import TamicTplTheme
 

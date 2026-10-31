@@ -2,6 +2,7 @@
 // фокусе — accent; выделение — фон accent, текст bg). Значение уходит в модель
 // по окончании ввода (edited), а не на каждую букву: иначе проверка задания
 // дёргалась бы посреди набора числа.
+// https://www.tamic.ru/docs/platforms/android.html#designer
 import QtQuick
 import TamicTplTheme
 import QtQuick.Templates as T

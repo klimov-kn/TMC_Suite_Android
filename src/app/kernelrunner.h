@@ -1,19 +1,22 @@
-// KernelRunner — общий интерфейс запуска счётного ядра (решение M9).
-//
-// Экраны видят только этот класс: старт, ход в процентах, шаг и такт, время,
-// журнал, код возврата и отмену. Как именно работает ядро, им не важно:
-//   * Android и настольная сборка — отдельный процесс (QProcess): ядро —
-//     программа tmc_rth / tmc_rtx (на Android — libtmc_rth.so / libtmc_rtx.so из
-//     каталога нативных библиотек приложения, решение A3);
-//
-// Протокол ядра (src/kernels/cli/tmc_kernel_main.cpp и tmc_kernel_console.cpp):
-//   stdout — строки «[tmc_rth] …»: «Steps: N», «Step i of N: read|start|done»,
-//            «ERROR …», «RESULT k: …»;
-//   stderr — при TMC_KERNEL_TRACE=1 строки окна состояния Windows-версии
-//            (PutStatistics/PutTrace): «nTmax M» в начале шага и «nT:t;Time:…»
-//            каждые 50 тактов (kernels/PlanarRT_H/TmcRTHRectNode.cpp, RunStep).
-// Код возврата: 0 — все шаги посчитаны, 1 — ошибка в .tpl, 2 — ошибка расчёта,
-// 3 — остановлено пользователем (выставляет KernelRunner).
+/// @file kernelrunner.h
+/// @brief KernelRunner — общий интерфейс запуска счётного ядра.
+///
+/// Экраны видят только этот класс: старт, ход в процентах, шаг и такт, время,
+/// журнал, код возврата и отмену. Как именно работает ядро, им не важно:
+///   * Android и настольная сборка — отдельный процесс (QProcess): ядро —
+///     программа tmc_rth / tmc_rtx (на Android — libtmc_rth.so / libtmc_rtx.so из
+///     каталога нативных библиотек приложения);
+///
+/// Протокол ядра (src/kernels/cli/tmc_kernel_main.cpp и tmc_kernel_console.cpp):
+///   stdout — строки «[tmc_rth] …»: «Steps: N», «Step i of N: read|start|done»,
+///            «ERROR …», «RESULT k: …»;
+///   stderr — при TMC_KERNEL_TRACE=1 строки окна состояния Windows-версии
+///            (PutStatistics/PutTrace): «nTmax M» в начале шага и «nT:t;Time:…»
+///            каждые 50 тактов (kernels/PlanarRT_H/TmcRTHRectNode.cpp, RunStep).
+/// Код возврата: 0 — все шаги посчитаны, 1 — ошибка в .tpl, 2 — ошибка расчёта,
+/// 3 — остановлено пользователем (выставляет KernelRunner).
+/// @see https://www.tamic.ru/docs/platforms/android.html#kernels
+
 #pragma once
 
 #include <QElapsedTimer>
