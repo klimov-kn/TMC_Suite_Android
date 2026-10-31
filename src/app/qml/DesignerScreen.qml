@@ -9,7 +9,7 @@ Item {
 
     property bool compact: false
     property string folder: ""             // папка задачи (M16)
-    property string startOpts: ""          // параметры запуска (снимки): sample=<id>, step=<0..4>
+    property string startOpts: ""          // параметры запуска (снимки): sample=<id>, card=<id>, library, step=<0..5>
     signal folderPicked(string folder)
     signal openTask(string folder, string name)
 
@@ -28,7 +28,16 @@ Item {
             const list = screen.startOpts.split(",")
             for (let i = 0; i < list.length; ++i) {
                 const o = list[i].trim()
-                if (o.indexOf("sample=") === 0) { page.designer.openSample(o.substring(7)); page.geometry.fit() }
+                if (o.indexOf("sample=") === 0) {
+                    page.designer.openSampleCard("b:" + o.substring(7))
+                    page.designer.openCardInEditor()
+                    page.geometry.fit()
+                } else if (o === "library") {
+                    page.openSamples()
+                } else if (o.indexOf("card=") === 0) {
+                    page.openSamples()
+                    page.openCard("b:" + o.substring(5))
+                }
                 else if (o.indexOf("step=") === 0) page.step = parseInt(o.substring(5))
             }
         }

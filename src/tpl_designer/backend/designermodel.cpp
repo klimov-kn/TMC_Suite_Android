@@ -3,7 +3,6 @@
 #include "cp1251.h"
 #include "emitter.h"
 #include "ramestimate.h"
-#include "sample.h"
 #include "sigfile.h"
 #include "taskfiles.h"
 #include "tplreader.h"
@@ -270,6 +269,7 @@ void TplDesignerModel::newProject()
     m_undo.clear();
     m_redo.clear();
     m_selectedId = -1;
+    m_multi.clear();
     pushToForm();
     setNote(QString());
     refresh();
@@ -423,6 +423,13 @@ void TplDesignerModel::followTimeWindow()
 
 void TplDesignerModel::setSetting(const QString &key, const QVariant &value)
 {
+    if (key == QLatin1String("timing") || key == QLatin1String("sWide")) {
+        snapshot();
+        (key == QLatin1String("timing") ? m_project.output.timingReport
+                                        : m_project.output.sMatrixLimitWideband) = value.toBool();
+        refresh();
+        return;
+    }
     bool ok = true;
     const double d = toDouble(value, &ok);
     const bool numeric = ok;
@@ -483,6 +490,8 @@ QVariantMap TplDesignerModel::settings() const
     const Project &p = m_project;
     const OutputSettings &o = p.output;
     QVariantMap m;
+    m.insert(QStringLiteral("timing"), m_project.output.timingReport);
+    m.insert(QStringLiteral("sWide"), m_project.output.sMatrixLimitWideband);
     m.insert(QStringLiteral("name"), p.name);
     m.insert(QStringLiteral("description"), p.description);
     m.insert(QStringLiteral("kernel"), p.kernel == Kernel::X ? QStringLiteral("X") : QStringLiteral("H"));
@@ -656,6 +665,7 @@ Port *TplDesignerModel::portById(int id)
 
 void TplDesignerModel::select(int id)
 {
+    m_multi.clear();
     if (id == m_selectedId)
         return;
     m_selectedId = id;
@@ -706,6 +716,13 @@ QVariantMap TplDesignerModel::shapeMap(const Shape &s) const
     m.insert(QStringLiteral("plasmaNValue"), plasmaFieldText(s.plasma.nFormula, s.plasma.n));
     m.insert(QStringLiteral("plasmaB"), s.plasma.hasB);
     m.insert(QStringLiteral("plasmaBValue"), plasmaFieldText(s.plasma.bFormula, s.plasma.b));
+    m.insert(QStringLiteral("plasmaS"), s.plasma.hasS);
+    m.insert(QStringLiteral("plasmaSValue"), num(s.plasma.s));
+    m.insert(QStringLiteral("plasmaNFile"), s.plasma.nFile);
+    m.insert(QStringLiteral("plasmaBFile"), s.plasma.bFile);
+    m.insert(QStringLiteral("plasmaYFile"), s.plasma.yFile);
+    m.insert(QStringLiteral("vx"), num(s.vx));
+    m.insert(QStringLiteral("vy"), num(s.vy));
     m.insert(QStringLiteral("plasmaY"), s.plasma.hasY);
     m.insert(QStringLiteral("plasmaYValue"), plasmaFieldText(s.plasma.yFormula, s.plasma.y));
     QVariantList present, edgeMat;
@@ -842,6 +859,16 @@ void TplDesignerModel::setShape(int id, const QString &key, const QVariant &valu
             s->points = pts;
         else
             setNote(QCoreApplication::translate("TplDesigner", "Точки — по одной на строке: «x; y»"));
+    } else if (key == QLatin1String("plasmaS")) { s->plasma.hasS = value.toBool();
+    } else if (key == QLatin1String("plasmaSValue")) {
+        if (ok) s->plasma.s = d;
+    } else if (key == QLatin1String("plasmaNFile")) { s->plasma.nFile = value.toString().trimmed();
+    } else if (key == QLatin1String("plasmaBFile")) { s->plasma.bFile = value.toString().trimmed();
+    } else if (key == QLatin1String("plasmaYFile")) { s->plasma.yFile = value.toString().trimmed();
+    } else if (key == QLatin1String("vx")) {
+        if (ok) s->vx = d;
+    } else if (key == QLatin1String("vy")) {
+        if (ok) s->vy = d;
     } else if (key == QLatin1String("plasmaN")) { s->plasma.hasN = value.toBool();
     } else if (key == QLatin1String("plasmaB")) { s->plasma.hasB = value.toBool();
     } else if (key == QLatin1String("plasmaY")) { s->plasma.hasY = value.toBool();
@@ -1042,6 +1069,24 @@ int TplDesignerModel::addPort(const QString &side)
 
 void TplDesignerModel::deleteSelected()
 {
+    if (!m_multi.isEmpty()) {
+        snapshot();
+        for (int gone : std::as_const(m_multi)) {
+            for (int i = 0; i < m_project.shapes.size(); ++i) {
+                if (m_project.shapes.at(i).id == gone) {
+                    m_project.shapes.removeAt(i);
+                    break;
+                }
+            }
+            for (Variant &v : m_project.variants)
+                v.disabledShapes.removeAll(gone);
+            m_project.sweep.shapeIds.removeAll(gone);
+        }
+        m_multi.clear();
+        m_selectedId = -1;
+        refresh();
+        return;
+    }
     const int id = m_selectedId;
     if (id < 0)
         return;
@@ -1071,6 +1116,30 @@ void TplDesignerModel::deleteSelected()
 
 void TplDesignerModel::duplicateSelected()
 {
+    if (!m_multi.isEmpty()) {
+        snapshot();
+        QVector<int> copies;
+        const QVector<int> source = m_multi;
+        for (int id : source) {
+            const Shape *src = shapeById(id);
+            if (!src)
+                continue;
+            Shape s = *src;
+            s.id = m_project.nextFreeId();
+            s.name = QCoreApplication::translate("TplDesigner", "%1 (копия)").arg(src->name);
+            const double d = 2.0 * std::max(m_project.delta, 0.001);
+            s.xMin += d; s.xMax += d;
+            s.yMin += d; s.yMax += d;
+            s.center += QPointF(d, d);
+            for (QPointF &pt : s.points)
+                pt += QPointF(d, d);
+            m_project.shapes << s;
+            copies << s.id;
+        }
+        m_multi = copies;
+        refresh();
+        return;
+    }
     const int id = m_selectedId;
     const double off = std::max(m_project.delta, 1.0) * 5.0;
     for (const Shape &src : std::as_const(m_project.shapes)) {
@@ -1109,6 +1178,7 @@ void TplDesignerModel::duplicateSelected()
 
 void TplDesignerModel::refresh()
 {
+    updateMemory();
     const Diagnostics d = validate(m_project);
     m_issues.clear();
     const QStringList errors = collapseIssues(d.errors);
@@ -1388,49 +1458,6 @@ QString TplDesignerModel::openTpl(const QString &fileName)
                + collapseIssues(r.warnings).join(QStringLiteral("\n• "));
     }
     return msg;
-}
-
-QVariantList TplDesignerModel::sampleSections() const
-{
-    QVariantList out;
-    for (const samples::Section &sec : samples::sections()) {
-        QVariantList items;
-        for (const samples::Sample *smp : samples::inSection(sec.id)) {
-            QVariantMap m;
-            m.insert(QStringLiteral("id"), smp->id);
-            // Названия — по-русски в ядре (уходят в .tpl); на экране — на языке интерфейса
-            // (каталог строк — sampletexts.cpp).
-            m.insert(QStringLiteral("title"), QCoreApplication::translate("TplSamples", smp->title.toUtf8().constData()));
-            m.insert(QStringLiteral("summary"), QCoreApplication::translate("TplSamples", smp->summary.toUtf8().constData()));
-            m.insert(QStringLiteral("kernel"), smp->kernel == Kernel::X ? QStringLiteral("X")
-                                                                        : QStringLiteral("H"));
-            items << m;
-        }
-        if (items.isEmpty())
-            continue;
-        QVariantMap m;
-        m.insert(QStringLiteral("title"), QCoreApplication::translate("TplSamples", sec.title.toUtf8().constData()));
-        m.insert(QStringLiteral("items"), items);
-        out << m;
-    }
-    return out;
-}
-
-QString TplDesignerModel::openSample(const QString &id)
-{
-    const samples::Sample *smp = samples::find(id);
-    if (!smp)
-        return QCoreApplication::translate("TplDesigner", "Образец не найден: %1").arg(id);
-    // Образец — рецепт с параметрами по умолчанию; открывается как НОВОЕ задание
-    // (mainwindow.cpp, openSample) вместе с сопутствующими файлами.
-    const samples::Build b = samples::make(*smp, samples::defaults(*smp));
-    snapshot();
-    m_project = b.project;
-    m_companions = b.companions;
-    m_selectedId = -1;
-    pushToForm();
-    refresh();
-    return QCoreApplication::translate("TplDesigner", "Открыт образец «%1».").arg(smp->title);
 }
 
 bool TplDesignerModel::writeFiles(QVariantMap *result)

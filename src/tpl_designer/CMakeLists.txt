@@ -132,6 +132,7 @@ qt_add_library(tamic_tpl_designer STATIC)
 set(_tpld_internal
     qml/StepTabs.qml qml/IssueChip.qml qml/SetupPage.qml qml/GeometryPage.qml
     qml/ObjectsPage.qml qml/ObjectRow.qml qml/OutputPage.qml qml/CheckPage.qml
+    qml/RunPlanPage.qml qml/MemoryRing.qml qml/SamplesPage.qml
     qml/SelectionEditor.qml qml/ShapeEditor.qml qml/PortEditor.qml qml/TPage.qml
     qml/TCard.qml qml/TButton.qml qml/TField.qml qml/TNote.qml qml/TSwitchRow.qml
     qml/TSegmented.qml qml/TSheet.qml qml/TIcon.qml qml/TToolButton.qml)
@@ -150,6 +151,9 @@ qt_add_qml_module(tamic_tpl_designer
     SOURCES
         backend/designermodel.h backend/designermodel.cpp
         backend/geometrycanvas.h backend/geometrycanvas.cpp
+        backend/designerextras.cpp
+        backend/samplepreview.h backend/samplepreview.cpp
+        backend/sysmemory.h backend/sysmemory.cpp
     IMPORTS TamicTplTheme
     QML_FILES
         qml/TplDesignerPage.qml
@@ -161,6 +165,9 @@ qt_add_qml_module(tamic_tpl_designer
         qml/ObjectRow.qml
         qml/OutputPage.qml
         qml/CheckPage.qml
+        qml/RunPlanPage.qml
+        qml/MemoryRing.qml
+        qml/SamplesPage.qml
         qml/SelectionEditor.qml
         qml/ShapeEditor.qml
         qml/PortEditor.qml

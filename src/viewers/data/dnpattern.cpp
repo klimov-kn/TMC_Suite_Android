@@ -386,55 +386,73 @@ double DnPattern::calculateImageDN_ForKip(double dAngle)   // c2DArray::Calculat
     return d;
 }
 
-void DnPattern::normirovkaDiagrNapr()   // c2DArray::NormirovkaDiagrNapr
+void DnPattern::normirovkaDiagrNapr()   // c2DArray::NormirovkaDiagrNapr, Б-12 Windows 5.0
 {
     if (bIsError) return;
     if (nAngle < 2) return;
 
-    int i;
-    double x, y, r, r1, dAng, dStep;
-    double xKip, yKip, rKip, dMaxKip;
+    int i, nFine;
+    double x, y, r, r1, dAng, dStep, dRmax, dPow, dMaxKip, dIntKip;
 
     if (!IsNormirovka) {
         IsNormirovka = true;
-        if (nIzl > nMaxTemporary) {   // IsCalculateKip()
-            for (i = 0, dKip = dKnd = dMax = 0.0, dStep = 2 * 3.141592653589 / (nAngle - 1); i < nAngle; i++) {
-                if (pdRealDN[size_t(i)] > dMax) dMax = pdRealDN[size_t(i)];
-            }
-            for (i = 0; i < nAngle; i++) {
-                dKnd += pdRealDN[size_t(i)] * pdRealDN[size_t(i)] * dStep;
-                pdRealDN[size_t(i)] /= dMax;
-            }
-            dKip = dKnd;
-            dKnd = (2 * 3.141592653589) * dMax * dMax / dKnd;
-            return;
+        // Электрический размер решётки задаёт густоту сетки: 64 точки на k*Rmax,
+        // чтобы не пропустить узкий главный лепесток.
+        for (i = 0, dRmax = 0.0; i < nIzl; i++) {
+            x = pcIzl[size_t(i)].dXcoordinata;
+            y = pcIzl[size_t(i)].dYcoordinata;
+            r = std::sqrt(x * x + y * y);
+            if (r > dRmax) dRmax = r;
         }
-
-        for (i = 0, dAng = 0.0, dStep = 2 * 3.141592653589 / (nPointForNormir - 1), dMax = 0.0, dMaxKip = 0.0,
-            dKnd = 0.0, dKip = 0.0; i < nPointForNormir; i++, dAng += dStep) {
+        nFine = nPointForNormir;
+        r = 64. * 2 * 3.141592653589 * dFreq * dRmax / 299792458.;
+        if (r + 1. > double(nFine)) nFine = (r + 1. > 4000000.) ? 4000000 : int(r + 1.);
+        if (nFine < 16) nFine = 16;
+        dStep = 2 * 3.141592653589 / nFine;
+        const bool big = nIzl > nMaxTemporary;
+        for (i = 0, dMax = 0.0, dKnd = 0.0, dMaxKip = 0.0, dIntKip = 0.0; i < nFine; i++) {
+            dAng = i * dStep;
             r1 = oneExpression;
             x = r1 * calculateRealDN(dAng);
             y = r1 * calculateImageDN(dAng);
-            r = x * x + y * y;
-            dKnd += dStep * r;
-            if (r > dMax) dMax = r;
-
-            xKip = calculateRealDN_ForKip(dAng);
-            yKip = calculateImageDN_ForKip(dAng);
-            rKip = xKip * xKip + yKip * yKip;
-            dKip += dStep * rKip;
-            if (rKip > dMaxKip) dMaxKip = rKip;
+            dPow = x * x + y * y;
+            dKnd += dPow * dStep;
+            if (dPow > dMax) dMax = dPow;
+            if (!big) {     // КИП: равномерная синфазная решётка той же геометрии
+                x = calculateRealDN_ForKip(dAng);
+                y = calculateImageDN_ForKip(dAng);
+                dPow = x * x + y * y;
+                dIntKip += dPow * dStep;
+                if (dPow > dMaxKip) dMaxKip = dPow;
+            }
         }
-
-        dKnd = 2 * 3.141592653589 * dMax * dMax / dKnd;
-
-        dKip = 2 * 3.141592653589 * dMaxKip * dMaxKip / dKip;
-        dKip = dKnd / dKip;
-
+        if (!(dMax > DBL_MIN) || !std::isfinite(dMax) || !(dKnd > 0.) || !std::isfinite(dKnd)) {
+            bIsError = true;
+            m_error = QStringLiteral("Directional pattern is identically zero or not a finite number");
+            return;
+        }
+        if (big) {
+            // Большая решётка: «КИП» — излучённая мощность, график нормируется своим максимумом.
+            dKip = dKnd;
+            dKnd = 2 * 3.141592653589 * dMax / dKnd;
+            for (i = 0, r = 0.0; i < nAngle; i++) {
+                if (!std::isfinite(pdRealDN[size_t(i)])) r = -1.;
+                if (r >= 0. && pdRealDN[size_t(i)] > r) r = pdRealDN[size_t(i)];
+            }
+            if (!(r > DBL_MIN)) {
+                bIsError = true;
+                m_error = QStringLiteral("Directional pattern is identically zero or not a finite number");
+                return;
+            }
+            dMax = r;
+            for (i = 0; i < nAngle; i++) pdRealDN[size_t(i)] /= dMax;
+            return;
+        }
+        dKnd = 2 * 3.141592653589 * dMax / dKnd;
+        if (dIntKip > 0. && dMaxKip > 0.) dKip = dKnd / (2 * 3.141592653589 * dMaxKip / dIntKip);
+        else dKip = FLT_MIN;
         dMax = std::sqrt(dMax);
         dMax *= 1.001;
-
-        if (dMax < DBL_MIN) return;
     }
 
     for (i = 0; i < nAngle; i++)

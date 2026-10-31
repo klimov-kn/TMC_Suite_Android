@@ -63,6 +63,13 @@ TPage {
             value: page.st.sMatrixFile || ""
             onEdited: (t) => page.put("sMatrixFile", t)
         }
+        TSwitchRow {
+            visible: page.st.sMatrix || false
+            text: qsTr("Ограничить окно у входа с файлом сигнала")
+            hint: qsTr("Без ограничения ядро считает S-матрицу по всему окну счёта.")
+            checked: page.st.sWide || false
+            onToggled: (on) => page.put("sWide", on)
+        }
         Grid {
             visible: page.st.sMatrix || false
             width: parent.width

@@ -16,10 +16,13 @@ Item {
     property bool editorOpen: false
     readonly property alias canvas: cv
     readonly property string selType: model.selected.type || ""
+    readonly property int groupSize: model.selectedIds.length
+    signal next()
 
     function fit() { cv.zoomToFit() }
 
     readonly property var tools: [
+        { key: "pan",     icon: "pan",     label: qsTr("Обзор") },
         { key: "select",  icon: "select",  label: qsTr("Выбор") },
         { key: "rect",    icon: "rect",    label: qsTr("Прям.") },
         { key: "circle",  icon: "circle",  label: qsTr("Круг") },
@@ -92,6 +95,7 @@ Item {
             TToolButton { icon: "fit"; onClicked: cv.zoomToFit() }
             TToolButton { icon: "grid"; checked: cv.gridVisible; onClicked: cv.gridVisible = !cv.gridVisible }
             TToolButton { icon: "snap"; checked: cv.snapEnabled; onClicked: cv.snapEnabled = !cv.snapEnabled }
+            TToolButton { icon: "multi"; checked: cv.multiSelect; onClicked: cv.multiSelect = !cv.multiSelect }
         }
         TButton {
             anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
@@ -161,10 +165,10 @@ Item {
             id: chainButtons
             anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
             spacing: 4
-            visible: cv.chainCount > 0
-            width: visible ? implicitWidth : 0
-            TButton { compact: true; text: qsTr("Отмена"); onClicked: cv.cancelDrawing() }
-            TButton { compact: true; primary: true; text: qsTr("Готово"); visible: cv.tool !== "arc"; onClicked: cv.finishChain() }
+            width: implicitWidth
+            TButton { compact: true; visible: cv.chainCount > 0; text: qsTr("Отмена"); onClicked: cv.cancelDrawing() }
+            TButton { compact: true; primary: true; text: qsTr("Готово"); visible: cv.chainCount > 0 && cv.tool !== "arc"; onClicked: cv.finishChain() }
+            TButton { compact: true; primary: true; text: qsTr("Далее"); visible: cv.chainCount === 0; onClicked: page.next() }
         }
     }
 
@@ -200,7 +204,7 @@ Item {
         Rectangle {
             width: parent.width
             height: visible ? Theme.touchMin + 16 : 0
-            visible: page.selType.length > 0
+            visible: page.selType.length > 0 || page.groupSize > 1
             color: Theme.surface2
             Text {
                 anchors {
@@ -208,7 +212,8 @@ Item {
                     right: selButtons.left; rightMargin: 8
                     verticalCenter: parent.verticalCenter
                 }
-                text: (page.model.selected.name || "") + "  ·  " + (page.model.selected.what || page.model.selected.kindText || "")
+                text: page.groupSize > 1 ? qsTr("Выбрано: %1").arg(page.groupSize)
+                      : (page.model.selected.name || "") + "  ·  " + (page.model.selected.what || page.model.selected.kindText || "")
                 color: Theme.text
                 font.family: Theme.fontUi
                 font.pixelSize: Theme.fontSizeSmall
@@ -219,7 +224,9 @@ Item {
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
                 spacing: 4
                 TButton { compact: true; danger: true; text: qsTr("Удалить"); onClicked: page.model.deleteSelected() }
-                TButton { compact: true; text: qsTr("Свойства"); onClicked: page.editorOpen = true }
+                TButton { compact: true; visible: page.groupSize > 1; text: qsTr("Копия"); onClicked: page.model.duplicateSelected() }
+                TButton { compact: true; visible: page.groupSize > 1; text: qsTr("Соединить"); onClicked: mergeNote.text = page.model.mergeSelected() }
+                TButton { compact: true; visible: page.groupSize <= 1; text: qsTr("Свойства"); onClicked: page.editorOpen = true }
             }
         }
     }
@@ -301,6 +308,61 @@ Item {
         }
     }
 
+    TSheet {
+        id: mergeSheet
+        title: qsTr("Геометрия")
+        open: mergeNote.text.length > 0
+        TNote { id: mergeNote; text: "" }
+        buttons: [ TButton { compact: true; text: qsTr("Понятно"); onClicked: mergeNote.text = "" } ]
+        onClosed: mergeNote.text = ""
+    }
+
+    // --- импорт среза 3D-модели (STL, OBJ) ---
+    TSheet {
+        id: importSheet
+        property var files: []
+        property string plane: "xy"
+        title: qsTr("Импорт из 3D")
+        TNote {
+            text: importSheet.files.length === 0
+                  ? qsTr("В папке задачи нет файлов .stl и .obj. Положите модель в папку задачи. STEP на телефоне не читается: сохраните модель в STL.")
+                  : qsTr("Модель режется плоскостью, срез становится обычными фигурами.")
+        }
+        TSegmented {
+            width: parent.width
+            options: [ { key: "xy", label: "XY" }, { key: "xz", label: "XZ" }, { key: "yz", label: "YZ" } ]
+            current: importSheet.plane
+            onPicked: (k) => importSheet.plane = k
+        }
+        TField { id: importOffset; width: parent.width; label: qsTr("Положение плоскости"); unit: qsTr("мм"); value: "0" }
+        Repeater {
+            model: importSheet.files
+            delegate: TButton {
+                required property string modelData
+                width: parent ? parent.width : 300
+                compact: true
+                text: modelData
+                onClicked: {
+                    importSheet.open = false
+                    mergeNote.text = page.model.importMesh(modelData, importSheet.plane, importOffset.value)
+                    cv.zoomToFit()
+                }
+            }
+        }
+        buttons: [ TButton { compact: true; text: qsTr("Закрыть"); onClicked: importSheet.open = false } ]
+    }
+
+    TSheet {
+        id: filletSheet
+        title: qsTr("Скругление углов")
+        TField { id: filletRadius; width: parent.width; label: qsTr("Радиус"); unit: qsTr("мм"); value: "5" }
+        buttons: [
+            TButton { compact: true; text: qsTr("Отмена"); onClicked: filletSheet.open = false },
+            TButton { compact: true; primary: true; text: qsTr("Скруглить")
+                      onClicked: { filletSheet.open = false; mergeNote.text = page.model.filletSelected(filletRadius.value) } }
+        ]
+    }
+
     // --- добавить фигуру или порт числами ---
     TSheet {
         id: addSheet
@@ -318,6 +380,8 @@ Item {
             TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Порт слева"); onClicked: page.addByNumbers("port:left") }
             TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Порт справа"); onClicked: page.addByNumbers("port:right") }
             TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Порт снизу"); onClicked: page.addByNumbers("port:bottom") }
+            TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Импорт 3D"); onClicked: { addSheet.open = false; importSheet.files = page.model.meshFiles(); importSheet.open = true } }
+            TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Скруглить углы"); enabled: page.selType === "shape"; onClicked: { addSheet.open = false; filletSheet.open = true } }
             TButton { width: (parent.width - Theme.spacing / 2) / 2; compact: true; text: qsTr("Порт сверху"); onClicked: page.addByNumbers("port:top") }
         }
         buttons: [ TButton { compact: true; text: qsTr("Закрыть"); onClicked: addSheet.open = false } ]

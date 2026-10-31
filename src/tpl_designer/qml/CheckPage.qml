@@ -9,7 +9,18 @@ TPage {
 
     required property DesignerModel model
     property string taskFolder: ""
+    /// Страница на экране: память обновляется только тогда.
+    property bool active: false
     signal generateRequested()
+    signal saveSampleRequested()
+
+    Timer {
+        interval: 3000
+        repeat: true
+        running: page.active
+        triggeredOnStart: true
+        onTriggered: page.model.updateMemory()
+    }
 
     TCard {
         width: page.colWidth
@@ -48,10 +59,43 @@ TPage {
             text: qsTr("Сгенерировать")
             onClicked: page.generateRequested()
         }
+        TButton {
+            compact: true
+            enabled: page.model.canGenerate
+            text: qsTr("Сохранить как образец")
+            onClicked: page.saveSampleRequested()
+        }
         TNote {
             text: page.taskFolder.length > 0 ? qsTr("Папка задачи: ") + page.taskFolder
                                              : qsTr("Папка задачи не выбрана — выберите её на вкладке «Задачи».")
             level: page.taskFolder.length > 0 ? "" : "warn"
+        }
+    }
+
+    TCard {
+        width: page.colWidth
+        title: qsTr("Память телефона")
+        Row {
+            width: parent.width
+            spacing: Theme.spacing
+            MemoryRing {
+                id: memoryRing
+                data: page.model.memory
+            }
+            Column {
+                width: parent.width - memoryRing.width - Theme.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                TNote { width: parent.width; visible: page.model.memory.known || false; text: qsTr("Занято: %1").arg(page.model.memory.usedText || "") }
+                TNote { width: parent.width; text: qsTr("Сетка расчёта: %1").arg(page.model.memory.gridText || "") }
+                TNote { width: parent.width; visible: page.model.memory.patternOn || false
+                        text: (page.model.memory.patternBorder ? qsTr("ДН по краю области: %1") : qsTr("ДН: %1")).arg(page.model.memory.patternText || "") }
+                TNote { width: parent.width; visible: page.model.memory.known || false; text: qsTr("Свободно: %1").arg(page.model.memory.freeText || "") }
+            }
+        }
+        TNote {
+            text: page.model.memory.text || ""
+            level: page.model.memory.level === "danger" ? "danger" : page.model.memory.level === "warn" ? "warn" : ""
         }
     }
 

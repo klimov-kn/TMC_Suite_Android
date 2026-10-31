@@ -36,14 +36,30 @@ Item {
 
     /// Кнопка «назад» телефона: true — обработано внутри страницы.
     function goBack() {
-        if (samplesSheet.open) { samplesSheet.open = false; return true }
+        if (samplesPage.visible) {
+            if (!samplesPage.goBack())
+                samplesPage.visible = false
+            return true
+        }
         if (openSheet.open) { openSheet.open = false; return true }
         if (messageSheet.open) { messageSheet.open = false; return true }
+        if (calcSheet.open) { calcSheet.open = false; return true }
+        if (saveSampleSheet.open) { saveSampleSheet.open = false; return true }
         if (confirmSheet.open) { confirmSheet.open = false; return true }
         if (geometryPage.editorOpen && step === 1) { geometryPage.editorOpen = false; return true }
         if (objectsPage.editorOpen && step === 2) { objectsPage.editorOpen = false; return true }
         if (step > 0) { step = step - 1; return true }
         return false
+    }
+
+    function openSamples() {
+        samplesPage.reload()
+        samplesPage.visible = true
+    }
+
+    function openCard(key) {
+        dm.openSampleCard(key)
+        samplesPage.cardOpen = true
     }
 
     function showMessage(title, text) {
@@ -128,7 +144,7 @@ Item {
                     id: chipPortrait
                     anchors { right: parent.right; rightMargin: Theme.gutter; verticalCenter: parent.verticalCenter }
                     model: dm
-                    onClicked: root.step = 4
+                    onClicked: root.step = 5
                 }
             }
 
@@ -143,7 +159,7 @@ Item {
                         top: parent.top; bottom: parent.bottom
                     }
                     current: root.step
-                    labels: [qsTr("Задание"), qsTr("Геометрия"), qsTr("Объекты"), qsTr("Вывод"), qsTr("Проверка")]
+                    labels: [qsTr("Задание"), qsTr("Геометрия"), qsTr("Объекты"), qsTr("Считать"), qsTr("Вывод"), qsTr("Проверка")]
                     onPicked: (i) => root.step = i
                 }
                 IssueChip {
@@ -151,7 +167,7 @@ Item {
                     visible: root.landscape
                     anchors { right: parent.right; rightMargin: Theme.gutter; verticalCenter: parent.verticalCenter }
                     model: dm
-                    onClicked: root.step = 4
+                    onClicked: root.step = 5
                 }
             }
             Rectangle { width: parent.width; height: Theme.borderW; color: Theme.line }
@@ -169,13 +185,15 @@ Item {
             wide: root.landscape
             onNext: root.step = 1
             onOpenRequested: { openSheet.files = dm.tplFiles(); openSheet.open = true }
-            onSamplesRequested: { samplesSheet.sections = dm.sampleSections(); samplesSheet.open = true }
+            onSamplesRequested: root.openSamples()
             onNewRequested: { dm.newProject(); geometryPage.fit() }
+            onCalculatorRequested: { calcSheet.recalc(); calcSheet.open = true }
         }
         GeometryPage {
             id: geometryPage
             model: dm
             landscape: root.landscape
+            onNext: root.step = 2
         }
         ObjectsPage {
             id: objectsPage
@@ -183,16 +201,23 @@ Item {
             landscape: root.landscape
             onNext: root.step = 3
         }
-        OutputPage {
+        RunPlanPage {
             model: dm
             wide: root.landscape
             onNext: root.step = 4
+        }
+        OutputPage {
+            model: dm
+            wide: root.landscape
+            onNext: root.step = 5
         }
         CheckPage {
             model: dm
             wide: root.landscape
             taskFolder: root.taskFolder
+            active: root.step === 5
             onGenerateRequested: root.generate()
+            onSaveSampleRequested: saveSampleSheet.open = true
         }
     }
 
@@ -257,75 +282,53 @@ Item {
         buttons: [ TButton { text: qsTr("Закрыть"); compact: true; onClicked: openSheet.open = false } ]
     }
 
-    TSheet {
-        id: samplesSheet
-        property var sections: []
-        title: qsTr("Библиотека образцов")
-        TNote { text: qsTr("Образец собирается по параметрам по умолчанию и открывается как новое задание.") }
-        Repeater {
-            model: samplesSheet.sections
-            delegate: Column {
-                id: sec
-                required property var modelData
-                width: parent.width
-                spacing: 4
-                Text {
-                    width: parent.width
-                    text: sec.modelData.title
-                    color: Theme.accent
-                    font.family: Theme.fontUi
-                    font.pixelSize: Theme.fontSizeBody
-                    font.weight: Font.Bold
-                    topPadding: Theme.spacing
-                }
-                Repeater {
-                    model: sec.modelData.items
-                    delegate: Rectangle {
-                        id: item
-                        required property var modelData
-                        width: sec.width
-                        height: Math.max(Theme.touchMin, itemText.implicitHeight + 16)
-                        radius: Theme.radiusSm
-                        color: itemArea.pressed ? Theme.surface2 : Theme.bg
-                        border.width: Theme.borderW
-                        border.color: Theme.line
-                        Column {
-                            id: itemText
-                            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 12 }
-                            Text {
-                                width: parent.width
-                                text: item.modelData.title + (item.modelData.kernel === "X" ? "  · X" : "")
-                                color: Theme.text
-                                font.family: Theme.fontUi
-                                font.pixelSize: Theme.fontSizeBody
-                                wrapMode: Text.Wrap
-                            }
-                            Text {
-                                width: parent.width
-                                text: item.modelData.summary
-                                color: Theme.textMute
-                                font.family: Theme.fontUi
-                                font.pixelSize: Theme.fontSizeSmall
-                                wrapMode: Text.Wrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                            }
-                        }
-                        MouseArea {
-                            id: itemArea
-                            anchors.fill: parent
-                            onClicked: {
-                                samplesSheet.open = false
-                                const msg = dm.openSample(item.modelData.id)
-                                geometryPage.fit()
-                                root.step = 1
-                                root.showMessage(qsTr("Образец"), msg)
-                            }
-                        }
-                    }
-                }
-            }
+    SamplesPage {
+        id: samplesPage
+        anchors.fill: parent
+        visible: false
+        model: dm
+        onCloseRequested: visible = false
+        onOpened: (message) => {
+            visible = false
+            geometryPage.fit()
+            root.step = 1
+            root.showMessage(qsTr("Образец"), message)
         }
-        buttons: [ TButton { text: qsTr("Закрыть"); compact: true; onClicked: samplesSheet.open = false } ]
+    }
+
+    TSheet {
+        id: calcSheet
+        property var out: ({})
+        function recalc() {
+            out = dm.calculate({ a: calcA.value, wgEps: calcWgEps.value, eps: calcEps.value, freq: calcFreq.value,
+                                 n: calcN.value, b: calcB.value })
+        }
+        title: qsTr("Калькулятор")
+        TField { id: calcA; width: parent.width; label: qsTr("Ширина волновода a"); unit: qsTr("мм"); value: "72"; onEdited: calcSheet.recalc() }
+        TField { id: calcWgEps; width: parent.width; label: qsTr("Заполнение ε"); value: "1"; onEdited: calcSheet.recalc() }
+        TNote { text: qsTr("Отсечка H10: %1, H20: %2").arg(calcSheet.out.fc10 || "").arg(calcSheet.out.fc20 || "") }
+        TField { id: calcEps; width: parent.width; label: qsTr("Диэлектрик ε"); value: "4"; onEdited: calcSheet.recalc() }
+        TField { id: calcFreq; width: parent.width; label: qsTr("Частота"); unit: qsTr("ГГц"); value: "4"; onEdited: calcSheet.recalc() }
+        TNote { text: qsTr("Длина волны в среде: %1").arg(calcSheet.out.lambda || "") }
+        TField { id: calcN; width: parent.width; label: qsTr("Концентрация N, м⁻³"); value: "1.24e18"; onEdited: calcSheet.recalc() }
+        TField { id: calcB; width: parent.width; label: qsTr("Подмагничивание B, Тл"); value: "0"; onEdited: calcSheet.recalc() }
+        TNote { text: calcSheet.out.plasma || "" }
+        buttons: [ TButton { compact: true; text: qsTr("Закрыть"); onClicked: calcSheet.open = false } ]
+    }
+
+    TSheet {
+        id: saveSampleSheet
+        title: qsTr("Сохранить как образец")
+        TField { id: sampleTitle; width: parent.width; numeric: false; label: qsTr("Название") }
+        TField { id: sampleSummary; width: parent.width; numeric: false; label: qsTr("Описание") }
+        buttons: [
+            TButton { text: qsTr("Отмена"); compact: true; onClicked: saveSampleSheet.open = false },
+            TButton { text: qsTr("Сохранить"); primary: true; compact: true
+                      onClicked: {
+                          const r = dm.saveAsSample(sampleTitle.value, sampleSummary.value)
+                          saveSampleSheet.open = false
+                          root.showMessage(qsTr("Образец"), r.message)
+                      } }
+        ]
     }
 }

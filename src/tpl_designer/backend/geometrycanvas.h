@@ -33,7 +33,8 @@ class GeometryCanvas : public QQuickPaintedItem
     QML_ELEMENT
 
     Q_PROPERTY(TplDesignerModel *model READ model WRITE setModel NOTIFY modelChanged)
-    /// select | rect | circle | line | contour | arc | port
+    /// pan | select | rect | circle | line | contour | arc | port
+    /// pan — обзор: палец двигает вид, касание выбирает объект (инструмент по умолчанию).
     Q_PROPERTY(QString tool READ tool WRITE setTool NOTIFY toolChanged)
     Q_PROPERTY(bool gridVisible READ gridVisible WRITE setGridVisible NOTIFY viewChanged)
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY viewChanged)
@@ -47,6 +48,8 @@ class GeometryCanvas : public QQuickPaintedItem
     /// Сколько точек набрано у ломаной/контура/дуги (кнопки «Готово» и «Отмена»).
     Q_PROPERTY(int chainCount READ chainCount NOTIFY hintChanged)
     Q_PROPERTY(double pixelsPerMm READ pixelsPerMm NOTIFY viewChanged)
+    /// Режим «несколько»: касание добавляет объект в группу или убирает из неё.
+    Q_PROPERTY(bool multiSelect READ multiSelect WRITE setMultiSelect NOTIFY viewChanged)
 
 public:
     explicit GeometryCanvas(QQuickItem *parent = nullptr);
@@ -65,6 +68,8 @@ public:
     QString cursorText() const { return m_cursorText; }
     int chainCount() const { return int(m_chain.size()); }
     double pixelsPerMm() const { return m_scale; }
+    bool multiSelect() const { return m_multiSelect; }
+    void setMultiSelect(bool on);
 
     Q_INVOKABLE void zoomToFit();
     Q_INVOKABLE void zoomBy(double factor, double x, double y);
@@ -115,6 +120,12 @@ private:
     double gridStep() const;
     Snap findSnap(const QPointF &rawMm, bool objects) const;
     int pick(const QPointF &screen) const;
+    bool hitShape(const tpl::Shape &s, const QPointF &screen) const;
+    /// Все объекты под точкой: порты, затем фигуры сверху вниз.
+    QVector<int> pickAll(const QPointF &screen) const;
+    /// Касание без сдвига: выбор, перебор наложенных объектов, группа.
+    void tapSelect(const QPointF &screen);
+    bool isSelectTool() const;
     int handleAt(const QPointF &screen) const;
     QVector<QPair<QPointF, int>> handles() const;
     void applyHandle(const QPointF &mm);
@@ -131,7 +142,9 @@ private:
     QString freshName(const QString &base, bool port) const;
 
     QPointer<TplDesignerModel> m_model;
-    QString m_tool = QStringLiteral("select");
+    QString m_tool = QStringLiteral("pan");
+    bool m_multiSelect = false;
+    QVector<tpl::Shape> m_origGroup;
     bool m_grid = true;
     bool m_snap = true;
     QVariantMap m_colors;
@@ -151,10 +164,10 @@ private:
     bool m_hasCursor = false;
     bool m_edited = false;
     int m_handle = -1;
-    tpl::Shape m_origShape;
     tpl::Port m_origPort;
     bool m_origIsPort = false;
     Snap m_lastSnap;
+    QString m_stackHint;      ///< подсказка о наложенных объектах
 
     QVector<QPointF> m_chain;  ///< ломаная/контур/дуга: набранные точки
 

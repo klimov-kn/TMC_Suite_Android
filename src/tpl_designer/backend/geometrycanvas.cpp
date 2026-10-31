@@ -222,6 +222,15 @@ void GeometryCanvas::setTool(const QString &t)
     update();
 }
 
+void GeometryCanvas::setMultiSelect(bool on)
+{
+    if (on == m_multiSelect)
+        return;
+    m_multiSelect = on;
+    emit viewChanged();
+    updateHint();
+}
+
 void GeometryCanvas::setGridVisible(bool on)
 {
     if (on == m_grid)
@@ -446,22 +455,10 @@ GeometryCanvas::Snap GeometryCanvas::findSnap(const QPointF &raw, bool objects) 
 
 // ------------------------------------------------------------------ попадания
 
-int GeometryCanvas::pick(const QPointF &sp) const
+bool GeometryCanvas::hitShape(const Shape &s, const QPointF &sp) const
 {
-    if (!m_model)
-        return -1;
-    const Project &p = m_model->project();
-    const Box &b = p.box;
-    for (const Port &port : p.ports) {
-        if (QLineF(toScreen(portCenter(port, b)), sp).length() <= kPortMarkerDp + 6.0)
-            return port.id;
-    }
-    for (const Port &port : p.ports) {
-        if (distToSegment(sp, toScreen(portEnd(port, b, false)), toScreen(portEnd(port, b, true))) <= kPickDp)
-            return port.id;
-    }
     const QPointF mm = toMm(sp);
-    const auto hit = [&](const Shape &s) {
+    {
         if (s.kind == ShapeKind::Rectangle) {
             for (int e = 0; e < 4; ++e) {
                 if (distToSegment(sp, toScreen(s.edgeFrom(e)), toScreen(s.edgeTo(e))) <= kPickDp)
@@ -489,24 +486,96 @@ int GeometryCanvas::pick(const QPointF &sp) const
             return path.contains(mm);
         }
         return false;
-    };
+    }
+}
+
+int GeometryCanvas::pick(const QPointF &sp) const
+{
+    if (!m_model)
+        return -1;
+    const Project &p = m_model->project();
+    const Box &b = p.box;
+    for (const Port &port : p.ports) {
+        if (QLineF(toScreen(portCenter(port, b)), sp).length() <= kPortMarkerDp + 6.0)
+            return port.id;
+    }
+    for (const Port &port : p.ports) {
+        if (distToSegment(sp, toScreen(portEnd(port, b, false)), toScreen(portEnd(port, b, true))) <= kPickDp)
+            return port.id;
+    }
     // 🔑 Выделенная фигура забирает касание у всех остальных (geometryview.cpp, pick).
-    const int sel = m_model->selectedId();
     for (const Shape &s : p.shapes) {
-        if (s.id == sel && hit(s))
+        if (m_model->isSelected(s.id) && hitShape(s, sp))
             return s.id;
     }
     for (int i = int(p.shapes.size()) - 1; i >= 0; --i) {
-        if (hit(p.shapes.at(i)))
+        if (hitShape(p.shapes.at(i), sp))
             return p.shapes.at(i).id;
     }
     return -1;
 }
 
+QVector<int> GeometryCanvas::pickAll(const QPointF &sp) const
+{
+    QVector<int> out;
+    if (!m_model)
+        return out;
+    const Project &p = m_model->project();
+    for (const Port &port : p.ports) {
+        if (distToSegment(sp, toScreen(portEnd(port, p.box, false)), toScreen(portEnd(port, p.box, true))) <= kPickDp
+            || QLineF(toScreen(portCenter(port, p.box)), sp).length() <= kPortMarkerDp + 6.0)
+            out << port.id;
+    }
+    for (int i = int(p.shapes.size()) - 1; i >= 0; --i) {
+        if (hitShape(p.shapes.at(i), sp))
+            out << p.shapes.at(i).id;
+    }
+    return out;
+}
+
+void GeometryCanvas::tapSelect(const QPointF &sp)
+{
+    const QVector<int> stack = pickAll(sp);
+    if (stack.isEmpty()) {
+        if (!m_multiSelect)
+            m_model->select(-1);
+        return;
+    }
+    if (m_multiSelect) {
+        // В группу по очереди: наложенные объекты добавляются с каждым касанием,
+        // а когда все под пальцем уже выбраны, касание снимает верхний.
+        for (int id : stack) {
+            if (!m_model->isSelected(id)) {
+                m_model->toggleSelected(id);
+                return;
+            }
+        }
+        m_model->toggleSelected(stack.first());
+        return;
+    }
+    // Касание по единственному уже выбранному объекту открывает его свойства.
+    if (stack.size() == 1 && stack.first() == m_model->selectedId()) {
+        emit editRequested(stack.first());
+        return;
+    }
+    // Объекты лежат друг на друге: повторное касание берёт следующий из стопки.
+    const int cur = stack.indexOf(m_model->selectedId());
+    m_model->select(stack.at(cur < 0 ? 0 : (cur + 1) % int(stack.size())));
+    if (stack.size() > 1) {
+        m_stackHint = QCoreApplication::translate("TplDesigner", "Здесь объектов: %1. Коснитесь ещё раз, чтобы взять следующий.")
+                          .arg(stack.size());
+    }
+}
+
+bool GeometryCanvas::isSelectTool() const
+{
+    return m_tool == QLatin1String("select");
+}
+
 QVector<QPair<QPointF, int>> GeometryCanvas::handles() const
 {
     QVector<QPair<QPointF, int>> out;
-    if (!m_model)
+    if (!m_model || !isSelectTool())
         return out;
     const Project &p = m_model->project();
     const int id = m_model->selectedId();
@@ -620,15 +689,17 @@ void GeometryCanvas::applyMove(const QPointF &delta)
         }
         return;
     }
-    for (Shape &s : p.shapes) {
-        if (s.id != id)
-            continue;
-        s = m_origShape;
-        s.xMin += delta.x(); s.xMax += delta.x();
-        s.yMin += delta.y(); s.yMax += delta.y();
-        s.center += delta;
-        for (QPointF &pt : s.points)
-            pt += delta;
+    for (const Shape &orig : std::as_const(m_origGroup)) {
+        for (Shape &s : p.shapes) {
+            if (s.id != orig.id)
+                continue;
+            s = orig;
+            s.xMin += delta.x(); s.xMax += delta.x();
+            s.yMin += delta.y(); s.yMax += delta.y();
+            s.center += delta;
+            for (QPointF &pt : s.points)
+                pt += delta;
+        }
     }
 }
 
@@ -794,7 +865,12 @@ void GeometryCanvas::pointerPress(const QPointF &pos)
     m_cursorMm = sn.pos;
     m_hasCursor = true;
 
-    if (m_tool == QLatin1String("select")) {
+    if (m_tool == QLatin1String("pan")) {
+        // Обзор: палец двигает вид, объект выбирается только касанием без сдвига.
+        m_mode = Mode::Pan;
+        return;
+    }
+    if (isSelectTool()) {
         const int h = handleAt(pos);
         if (h >= 0) {
             m_mode = Mode::Handle;
@@ -802,12 +878,12 @@ void GeometryCanvas::pointerPress(const QPointF &pos)
             return;
         }
         const int id = pick(pos);
-        if (id >= 0) {
-            const bool already = (id == m_model->selectedId());
-            m_model->select(id);
-            m_mode = already ? Mode::Move : Mode::Tap;
+        if (id >= 0 && m_model->isSelected(id) && !m_multiSelect) {
+            // Двигается только то, что уже выбрано.
+            m_mode = Mode::Move;
             m_startMm = toMm(pos);
             m_origIsPort = false;
+            m_origGroup.clear();
             for (const Port &p : m_model->project().ports) {
                 if (p.id == id) {
                     m_origPort = p;
@@ -815,8 +891,8 @@ void GeometryCanvas::pointerPress(const QPointF &pos)
                 }
             }
             for (const Shape &s : m_model->project().shapes) {
-                if (s.id == id)
-                    m_origShape = s;
+                if (m_model->isSelected(s.id))
+                    m_origGroup << s;
             }
             return;
         }
@@ -852,15 +928,9 @@ void GeometryCanvas::pointerMove(const QPointF &pos)
     case Mode::Tap:
         if (!slop)
             return;
-        if (m_tool == QLatin1String("select") && m_model->selectedId() >= 0) {
-            // Тянут только что выбранную фигуру — сразу двигаем её.
-            m_mode = Mode::Move;
-        } else {
-            m_mode = Mode::Pan;
-            panBy(pos.x() - m_pressScreen.x(), pos.y() - m_pressScreen.y());
-            return;
-        }
-        Q_FALLTHROUGH();
+        m_mode = Mode::Pan;
+        panBy(pos.x() - m_pressScreen.x(), pos.y() - m_pressScreen.y());
+        return;
     case Mode::Move: {
         if (!slop && !m_edited)
             return;
@@ -927,13 +997,11 @@ void GeometryCanvas::pointerRelease(const QPointF &pos)
     m_mode = Mode::None;
     switch (mode) {
     case Mode::Pan:
-        if (QLineF(pos, m_pressScreen).length() <= kTapSlopDp && m_tool == QLatin1String("select"))
-            m_model->select(-1); // касание мимо всего — снять выделение
+        if (QLineF(pos, m_pressScreen).length() <= kTapSlopDp)
+            tapSelect(pos);
         break;
     case Mode::Tap:
-        if (m_tool == QLatin1String("select")) {
-            // Касание по уже выделенному — свойства; по новому — просто выделение.
-        } else {
+        {
             const Snap sn = findSnap(toMm(pos), true);
             m_lastSnap = sn;
             m_cursorMm = sn.pos;
@@ -947,7 +1015,7 @@ void GeometryCanvas::pointerRelease(const QPointF &pos)
         if (m_edited) {
             m_model->endEdit();
         } else {
-            emit editRequested(m_model->selectedId());
+            tapSelect(pos);
         }
         break;
     case Mode::Handle:
@@ -1106,7 +1174,11 @@ void GeometryCanvas::setCursorText(const QString &t)
 void GeometryCanvas::updateHint()
 {
     QString h;
-    if (m_tool == QLatin1String("select")) {
+    if (m_multiSelect) {
+        h = QCoreApplication::translate("TplDesigner", "Несколько: касайтесь объектов. Наложенные добавляются по очереди.");
+    } else if (m_tool == QLatin1String("pan")) {
+        h = QCoreApplication::translate("TplDesigner", "Палец двигает вид, два пальца — масштаб. Касание выбирает объект.");
+    } else if (m_tool == QLatin1String("select")) {
         h = QCoreApplication::translate("TplDesigner", "Касание — выбрать, протяжка выбранной — сдвиг, за точку — размер. "
                            "Два пальца — масштаб.");
     } else if (m_tool == QLatin1String("rect")) {
@@ -1124,6 +1196,10 @@ void GeometryCanvas::updateHint()
                                   : QCoreApplication::translate("TplDesigner", "Дуга: коснитесь точки, через которую идёт выгиб.");
     } else if (m_tool == QLatin1String("port")) {
         h = QCoreApplication::translate("TplDesigner", "Протяните вдоль границы области — это апертура входа.");
+    }
+    if (!m_stackHint.isEmpty()) {
+        h = m_stackHint;
+        m_stackHint.clear();
     }
     if (h != m_hint) {
         m_hint = h;
@@ -1308,18 +1384,17 @@ void GeometryCanvas::paint(QPainter *p)
     p->setBrush(fill);
     p->drawRect(QRectF(toScreen(QPointF(b.xMin, b.yMax)), toScreen(QPointF(b.xMax, b.yMin))));
 
-    const int sel = m_model->selectedId();
     // Заливки снизу, стенки поверх (решение оригинала 2026-10-02).
     for (const Shape &s : pr.shapes) {
         if (!s.isContour())
-            drawShape(p, s, s.id == sel);
+            drawShape(p, s, m_model->isSelected(s.id));
     }
     for (const Shape &s : pr.shapes) {
         if (s.isContour())
-            drawShape(p, s, s.id == sel);
+            drawShape(p, s, m_model->isSelected(s.id));
     }
     for (const Port &port : pr.ports)
-        drawPort(p, port, port.id == sel);
+        drawPort(p, port, port.id == m_model->selectedId());
 
     // Выделение и ручки.
     const QColor accent = color("select");

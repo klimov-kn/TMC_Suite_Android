@@ -108,6 +108,21 @@ Column {
             onEdited: (t) => ed.put("plasmaBValue", t)
         }
         TSwitchRow {
+            text: qsTr("Потери: проводимость σ")
+            checked: ed.s.plasmaS || false
+            onToggled: (on) => ed.put("plasmaS", on)
+        }
+        TField {
+            visible: ed.s.plasmaS || false
+            width: parent.width
+            label: qsTr("σ, См/м")
+            value: ed.s.plasmaSValue || ""
+            onEdited: (t) => ed.put("plasmaSValue", t)
+        }
+        TField { width: parent.width; numeric: false; mono: true; label: qsTr("N из файла"); value: ed.s.plasmaNFile || ""; onEdited: (t) => ed.put("plasmaNFile", t) }
+        TField { width: parent.width; numeric: false; mono: true; label: qsTr("B из файла"); value: ed.s.plasmaBFile || ""; onEdited: (t) => ed.put("plasmaBFile", t) }
+        TField { width: parent.width; numeric: false; mono: true; label: qsTr("Y из файла"); value: ed.s.plasmaYFile || ""; onEdited: (t) => ed.put("plasmaYFile", t) }
+        TSwitchRow {
             text: qsTr("Потери Y")
             checked: ed.s.plasmaY || false
             onToggled: (on) => ed.put("plasmaY", on)
@@ -152,6 +167,13 @@ Column {
         TField { width: (parent.width - Theme.spacing) / 2; label: qsTr("R наружн."); value: ed.s.rMax || ""; onEdited: (t) => ed.put("rMax", t) }
         TField { width: (parent.width - Theme.spacing) / 2; label: qsTr("Угол от"); unit: "°"; value: ed.s.fiMin || ""; onEdited: (t) => ed.put("fiMin", t) }
         TField { width: (parent.width - Theme.spacing) / 2; label: qsTr("Угол до"); unit: "°"; value: ed.s.fiMax || ""; onEdited: (t) => ed.put("fiMax", t) }
+    }
+    Grid {
+        width: parent.width
+        columns: 2
+        columnSpacing: Theme.spacing
+        TField { width: (parent.width - Theme.spacing) / 2; label: qsTr("Скорость Vx"); value: ed.s.vx || ""; onEdited: (t) => ed.put("vx", t) }
+        TField { width: (parent.width - Theme.spacing) / 2; label: qsTr("Скорость Vy"); value: ed.s.vy || ""; onEdited: (t) => ed.put("vy", t) }
     }
     TField {
         visible: ed.s.kind === "polygon" || ed.s.kind === "polyline"

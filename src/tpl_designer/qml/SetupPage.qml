@@ -12,6 +12,7 @@ TPage {
     signal openRequested()
     signal samplesRequested()
     signal newRequested()
+    signal calculatorRequested()
 
     function put(key, value) { page.model.setSetting(key, value) }
 
@@ -35,6 +36,11 @@ TPage {
             options: [ { key: "H", label: qsTr("H — tmc_rth") }, { key: "X", label: qsTr("X — с плазмой") } ]
             current: page.st.kernel || "H"
             onPicked: (k) => page.put("kernel", k)
+        }
+        TButton {
+            compact: true
+            text: qsTr("Калькулятор")
+            onClicked: page.calculatorRequested()
         }
         TNote { text: qsTr("Заголовок файла у обоих ядер один — #TMC_RT_H. Плазму (N, B, Y) понимает только X.") }
         Grid {

@@ -15,6 +15,8 @@ Shape {
     preferredRendererType: Shape.CurveRenderer
 
     readonly property var paths: ({
+        "pan":     "M12 3 L12 21 M3 12 L21 12 M12 3 L9 6 M12 3 L15 6 M12 21 L9 18 M12 21 L15 18 M3 12 L6 9 M3 12 L6 15 M21 12 L18 9 M21 12 L18 15",
+        "multi":   "M4 4 L14 4 L14 14 L4 14 Z M10 10 L20 10 L20 20 L10 20 Z",
         "select":  "M7 3 L7 19 L11 15 L14 21 L16.5 20 L13.5 14 L18 13.5 Z",
         "rect":    "M3.5 6 L20.5 6 L20.5 18 L3.5 18 Z",
         "circle":  "M12 4 A8 8 0 1 1 11.99 4 Z",

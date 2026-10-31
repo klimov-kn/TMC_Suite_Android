@@ -26,7 +26,7 @@ struct SDoc : ChartBase::Doc
 };
 
 // Виды оси Y (порядок в списке экрана) -> TMC_GR_TYPE_* (Include/Tmcgrviw.h).
-enum SMode { SModeAbs = 0, SModeLoss, SModeVswr, SModePhaseDeg, SModePhaseRad };
+enum SMode { SModeAbs = 0, SModeLoss, SModeVswr, SModePhaseDeg, SModePhaseUnwrap, SModePhaseRad };
 
 } // namespace
 
@@ -38,7 +38,7 @@ SMatrixChart::SMatrixChart(QQuickItem *parent)
 
 void SMatrixChart::retranslate()
 {
-    setModes({ QStringLiteral("|S|"), tr("L, дБ"), tr("КСВН"), tr("Фаза, °"), tr("Фаза, рад") });
+    setModes({ QStringLiteral("|S|"), tr("L, дБ"), tr("КСВН"), tr("Фаза, °"), tr("Фаза разв., °"), tr("Фаза, рад") });
 }
 
 ChartBase::Loader SMatrixChart::loader() const
@@ -63,7 +63,7 @@ ChartBase::Loader SMatrixChart::loader() const
 void SMatrixChart::rebuild()
 {
     const auto *doc = static_cast<const SDoc *>(m_doc.get());
-    const QString yTitles[] = { QStringLiteral("|S|"), tr("L, дБ"), tr("КСВН"), tr("φ, °"), tr("φ, рад") };
+    const QString yTitles[] = { QStringLiteral("|S|"), tr("L, дБ"), tr("КСВН"), tr("φ, °"), tr("φ, °"), tr("φ, рад") };
     setAxisTitles(tr("f, ГГц"), yTitles[m_mode]);
     int color = 0;
     for (size_t fi = 0; fi < doc->files.size(); ++fi) {
@@ -101,6 +101,8 @@ void SMatrixChart::rebuild()
                         s.x.resize(f.size());
                         s.y.resize(f.size());
                         // CTMCGROUTView::PrepareDoubleGraph (Tmcgrout/TMCGROUTView.cpp), без выражений.
+                        double prevPhase = 0.0, phaseTurns = 0.0;
+                        bool havePhase = false;
                         for (size_t j = 0; j < f.size(); ++j) {
                             s.x[j] = f[j] / (1.e+9);                                   // TMC_GR_TYPE_FGHz
                             if (!(std::fabs(v[j].x) < FLT_MAX && std::fabs(v[j].y) < FLT_MAX)) {
@@ -121,6 +123,17 @@ void SMatrixChart::rebuild()
                             case SModePhaseDeg:                                        // TMC_GR_TYPE_SFD
                                 s.y[j] = 180. / (3.141592653589) * tmc::cphase(v[j]);
                                 break;
+                            case SModePhaseUnwrap: {                                   // Д-8: порог π
+                                const double ph = tmc::cphase(v[j]);
+                                if (havePhase) {
+                                    if (ph - prevPhase > 3.141592653589) phaseTurns -= 1.0;
+                                    else if (ph - prevPhase < -3.141592653589) phaseTurns += 1.0;
+                                }
+                                prevPhase = ph;
+                                havePhase = true;
+                                s.y[j] = 180. / (3.141592653589) * (ph + 2 * 3.141592653589 * phaseTurns);
+                                break;
+                            }
                             case SModePhaseRad:                                        // TMC_GR_TYPE_SFR
                                 s.y[j] = tmc::cphase(v[j]);
                                 break;

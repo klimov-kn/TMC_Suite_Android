@@ -11,6 +11,8 @@
 
 #include "emitter.h"
 #include "project.h"
+#include "sample.h"
+#include "usersamples.h"
 
 #include <QObject>
 #include <QPointF>
@@ -56,6 +58,14 @@ class TplDesignerModel : public QObject
     Q_PROPERTY(QString note READ note NOTIFY noteChanged)
     /// Формы падающей волны из файла: [{kind, name, hint}].
     Q_PROPERTY(QVariantList waveforms READ waveforms CONSTANT)
+    /// Страница «Что считать»: входы, варианты геометрии, поворот объекта (designerextras.cpp).
+    Q_PROPERTY(QVariantMap runPlan READ runPlan NOTIFY changed)
+    /// Память телефона и оценка расчёта: {known, total, used, grid, pattern, fits, text, level ...}.
+    Q_PROPERTY(QVariantMap memory READ memory NOTIFY memoryChanged)
+    /// Номера выбранных фигур; больше одного — группа.
+    Q_PROPERTY(QVariantList selectedIds READ selectedIds NOTIFY changed)
+    /// Карточка образца: параметры, проверка, паспорт, числа ядра.
+    Q_PROPERTY(QVariantMap sampleCard READ sampleCard NOTIFY sampleCardChanged)
 
 public:
     explicit TplDesignerModel(QObject *parent = nullptr);
@@ -92,6 +102,20 @@ public:
     bool canRedo() const { return !m_redo.isEmpty(); }
     QString note() const { return m_note; }
     QVariantList waveforms() const;
+    QVariantMap runPlan() const;
+    QVariantMap memory() const { return m_memory; }
+    QVariantList selectedIds() const;
+    /// Фигура выбрана (одна или в группе).
+    bool isSelected(int id) const;
+    /// Выбранная группа; пусто, если выбрано не больше одной фигуры.
+    const QVector<int> &multi() const { return m_multi; }
+    QVariantMap sampleCard() const { return m_card; }
+    /// Задание карточки образца для картинки (SamplePreview).
+    const tpl::Project &cardProject() const { return m_cardBuild.project; }
+    /// Собрать образец по ключу; values == nullptr — по умолчанию.
+    tpl::samples::Build buildSample(const QString &key, const tpl::samples::Values *values) const;
+    /// Подставить задание только для показа, без проверки (SamplePreview).
+    void setViewProject(const tpl::Project &p);
 
     // --- команды страниц ---
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
@@ -115,9 +139,44 @@ public:
     /// прочитано и что модель выражает не так, как в файле.
     Q_INVOKABLE QString openTpl(const QString &fileName);
 
-    /// Образцы библиотеки: [{section, title, items: [{id, title, summary, kernel}]}].
-    Q_INVOKABLE QVariantList sampleSections() const;
-    Q_INVOKABLE QString openSample(const QString &id);
+    /// Образцы библиотеки: [{id, title, summary, items: [{key, title, summary, standard, kernel}]}].
+    Q_INVOKABLE QVariantList sampleSections();
+    Q_INVOKABLE void openSampleCard(const QString &key);
+    Q_INVOKABLE void setSampleParam(const QString &key, const QVariant &value);
+    Q_INVOKABLE void resetSampleParams();
+    /// Открыть образец карточки в редакторе. Ответ — текст для человека.
+    Q_INVOKABLE QString openCardInEditor();
+    /// Положить текущее задание в «Мои образцы». Ответ: {ok, message}.
+    Q_INVOKABLE QVariantMap saveAsSample(const QString &title, const QString &summary);
+    Q_INVOKABLE bool deleteUserSample();
+
+    // --- «Что считать» ---
+    Q_INVOKABLE void setExciter(int portId, bool on);
+    Q_INVOKABLE void addVariant();
+    Q_INVOKABLE void presetVariants();
+    Q_INVOKABLE void removeVariant(int index);
+    Q_INVOKABLE void setVariant(int index, const QString &key, const QString &value);
+    Q_INVOKABLE void setVariantShape(int index, int shapeId, bool on);
+    Q_INVOKABLE void setSweep(const QString &key, const QVariant &value);
+    Q_INVOKABLE void setSweepShape(int shapeId, bool on);
+
+    // --- справочный калькулятор и импорт ---
+    /// Отсечки волновода, длина волны, частоты плазмы (окно «Калькулятор» настольной версии).
+    Q_INVOKABLE QVariantMap calculate(const QVariantMap &in) const;
+    /// Модели .stl и .obj в папке задачи.
+    Q_INVOKABLE QStringList meshFiles() const;
+    /// Срез модели плоскостью -> обычные фигуры. plane: xy | yz | xz. Ответ — текст для человека.
+    Q_INVOKABLE QString importMesh(const QString &fileName, const QString &plane, const QString &offset);
+
+    // --- память и группа фигур ---
+    /// Перечитать память телефона: страница «Проверка» вызывает это раз в несколько секунд.
+    Q_INVOKABLE void updateMemory();
+    /// Добавить фигуру в группу или убрать из неё.
+    Q_INVOKABLE void toggleSelected(int id);
+    /// Соединить выбранные линии в одну фигуру. Ответ — текст для человека.
+    Q_INVOKABLE QString mergeSelected();
+    /// Скруглить углы выбранного прямоугольника. Ответ — текст ошибки или пусто.
+    Q_INVOKABLE QString filletSelected(const QString &radiusText);
 
     /// Какие из файлов задания уже лежат в папке задачи (вопрос «перезаписать?»).
     Q_INVOKABLE QStringList existingFiles() const;
@@ -135,6 +194,8 @@ signals:
     void taskFolderChanged();
     void exporterChanged();
     void noteChanged();
+    void memoryChanged();
+    void sampleCardChanged();
     /// Задание записано; путь к .tpl внутри папки задачи.
     void saved(const QString &tplPath);
     /// Задание записано: папка и имя .tpl (для перехода к нему в оболочке).
@@ -145,6 +206,7 @@ private:
     void refresh();
     void setNote(const QString &n);
     void pushToForm();
+    void rebuildCard();
     QVector<double> collectFreqs() const;
     double stepForMaxFreqs() const;
     void followTimeWindow();
@@ -182,6 +244,15 @@ private:
     QString m_summary;
     QString m_note;
     bool m_editing = false;
+
+    QVector<int> m_multi;                   ///< выбранная группа фигур (2 и больше)
+    QVariantMap m_memory;
+    QString m_cardKey;                      ///< открытая карточка образца
+    tpl::samples::Values m_cardValues;
+    tpl::samples::Build m_cardBuild;
+    QVariantMap m_card;
+    int m_cardRevision = 0;
+    QVector<tpl::samples::UserSample> m_userSamples;
 
     QVector<tpl::Project> m_undo;
     QVector<tpl::Project> m_redo;
