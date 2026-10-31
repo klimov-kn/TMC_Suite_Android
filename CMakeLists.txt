@@ -33,6 +33,7 @@ endif()
 
 # Заголовки QRhi — закрытые заголовки Qt, сборка привязана к этой версии Qt намеренно.
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
+set(QT_SILENCE_MISSING_DEPENDENCY_TARGET_WARNING ON)
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick)
 if(ANDROID)
     # QtAndroidPrivate::startActivity (выбор папки SAF с ответом) — закрытый API QtCore.
