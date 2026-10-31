@@ -93,6 +93,11 @@ Item {
                 enabledSwitch: !screen.busyThis
                 onPicked: (m) => TaskStore.setMode(screen.folder, screen.task, m)
             }
+            Chip {
+                text: qsTr("Замер времени")
+                active: Calc.runner.timeReport
+                onClicked: Calc.runner.timeReport = !Calc.runner.timeReport
+            }
             TamicButton {
                 id: runCompact
                 width: Math.min(220, parent.width * 0.42)

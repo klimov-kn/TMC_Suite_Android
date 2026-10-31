@@ -79,7 +79,6 @@ if(NOT TARGET tamic_tpl_theme)
     qt_add_qml_module(tamic_tpl_theme
         URI TamicTplTheme
         VERSION 1.0
-        OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/TamicTplTheme
         RESOURCE_PREFIX /qt/qml
         QML_FILES ${_fv_theme}
     )
@@ -98,7 +97,6 @@ endforeach()
 qt_add_qml_module(tamic_fieldview
     URI TamicFieldView
     VERSION 1.0
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/TamicFieldView
     RESOURCE_PREFIX /qt/qml
     SOURCES
         rhi/fieldscene.h rhi/fieldscene.cpp

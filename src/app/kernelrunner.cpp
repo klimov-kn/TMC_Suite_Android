@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSettings>
 
 #include <algorithm>
 
@@ -41,6 +42,23 @@ QString stripPrefix(const QString &line)
 } // namespace
 
 // ---------------------------------------------------------------- KernelProgress
+
+/// Настройки запуска ядра: отдельный файл в каталоге данных приложения.
+static QSettings &runnerSettings()
+{
+    static QSettings s(QDir(Platform::dataDir()).filePath(QStringLiteral("runner.ini")), QSettings::IniFormat);
+    return s;
+}
+
+void KernelRunner::setTimeReport(bool on)
+{
+    if (on == m_timeReport)
+        return;
+    m_timeReport = on;
+    runnerSettings().setValue(QStringLiteral("timeReport"), on);
+    runnerSettings().sync();
+    emit timeReportChanged();
+}
 
 bool KernelProgress::parseLine(const QString &rawLine)
 {
@@ -128,6 +146,7 @@ double KernelProgress::percent() const
 KernelRunner::KernelRunner(QObject *parent)
     : QObject(parent)
 {
+    m_timeReport = runnerSettings().value(QStringLiteral("timeReport"), false).toBool();
     m_uiTimer.setInterval(kUiIntervalMs);
     connect(&m_uiTimer, &QTimer::timeout, this, &KernelRunner::flushUi);
     m_killTimer.setSingleShot(true);
@@ -211,7 +230,11 @@ bool KernelRunner::start(const QString &mode, const QString &tplPath, const QStr
     delete m_proc;
     m_proc = new QProcess(this);
     m_proc->setProgram(exe);
-    m_proc->setArguments({ tplPath });
+    QStringList args;
+    if (m_timeReport)
+        args << QStringLiteral("-Time");
+    args << tplPath;
+    m_proc->setArguments(args);
     m_proc->setWorkingDirectory(workDir);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("TMC_KERNEL_TRACE"), QStringLiteral("1"));   // такты в stderr

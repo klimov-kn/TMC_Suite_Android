@@ -11,8 +11,7 @@ thesis of K. N. Klimov (2007). When you publish results obtained with this
 software, please cite the author.
 
 Third-party components distributed with the APK keep their own licenses:
-  - Qt 6 - GNU LGPL v3 (dynamically linked, unmodified), except the library
-    Qt6Quick3DUtils - GNU GPL v3;
+  - Qt 6 - GNU LGPL v3 (dynamically linked, unmodified);
   - AndroidX Core - Apache License 2.0.
 Third-party files included in this repository:
   - fonts Inter and JetBrains Mono (src/app/fonts) - SIL Open Font License 1.1.

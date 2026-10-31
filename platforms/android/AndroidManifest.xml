@@ -14,7 +14,6 @@
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
-    <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
     <!-- Расчёт в фоне (этап П3): служба переднего плана с уведомлением о ходе
          расчёта, процессор не засыпает при выключенном экране. -->
@@ -22,12 +21,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Сеть и общая память не нужны: расчёт на телефоне, файлы — через окно выбора папки
-         (SAF) и «Поделиться». Модули Qt добавляют эти разрешения сами — убираем при сборке
-         (анкета «Безопасность данных» Google Play, решение M33). -->
-    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <!-- Сеть и общая память не нужны: расчёт идёт на телефоне, файлы — через системные окна. -->
     <supports-screens
         android:anyDensity="true"
         android:largeScreens="true"

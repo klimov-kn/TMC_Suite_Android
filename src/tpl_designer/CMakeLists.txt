@@ -119,7 +119,6 @@ set_source_files_properties(${_tpld_theme} PROPERTIES
 qt_add_qml_module(tamic_tpl_theme
     URI TamicTplTheme
     VERSION 1.0
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/TamicTplTheme
     RESOURCE_PREFIX /qt/qml
     QML_FILES ${_tpld_theme}
 )
@@ -145,7 +144,6 @@ endforeach()
 qt_add_qml_module(tamic_tpl_designer
     URI TamicTplDesigner
     VERSION 1.0
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/TamicTplDesigner
     RESOURCE_PREFIX /qt/qml
     SOURCES
         backend/designermodel.h backend/designermodel.cpp

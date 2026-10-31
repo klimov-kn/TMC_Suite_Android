@@ -31,6 +31,8 @@ if(TAMIC_KERNELS_ONLY)
     return()
 endif()
 
+# Заголовки QRhi — закрытые заголовки Qt, сборка привязана к этой версии Qt намеренно.
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick)
 if(ANDROID)
     # QtAndroidPrivate::startActivity (выбор папки SAF с ответом) — закрытый API QtCore.
@@ -120,21 +122,23 @@ else()
         BUILD_BYPRODUCTS ${TAMIC_KERNEL_OUT}/${TAMIC_KERNEL_FILE_H} ${TAMIC_KERNEL_OUT}/${TAMIC_KERNEL_FILE_X})
 endif()
 
-# --- Приложение -------------------------------------------------------------
-add_subdirectory(src/app)
+# Все QML-модули в одном каталоге сборки: там их находит сканер импортов.
+set(QT_QML_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml)
 
 # --- Графики результатов: QML-модуль Tamic.Viewers ------------------
 add_subdirectory(src/viewers)
-target_link_libraries(tamic PRIVATE tamic_viewers_module)
 
 # --- Встроенный TPL Designer: QML-модуль TamicTplDesigner -------
 add_subdirectory(src/tpl_designer)
-target_link_libraries(tamic PRIVATE tamic_tpl_designer_module)
 
 # --- Поле на Qt RHI: QML-модуль TamicFieldView -------------------
 # После TPL Designer: общий модуль темы TamicTplTheme создаётся там один раз.
 add_subdirectory(src/fieldview)
-target_link_libraries(tamic PRIVATE tamic_fieldview_module tamic_fieldview_core)
+
+# --- Приложение: после модулей, их цели нужны при подключении статических плагинов QML --
+add_subdirectory(src/app)
+target_link_libraries(tamic PRIVATE tamic_viewers_module tamic_tpl_designer_module
+                      tamic_fieldview_module tamic_fieldview_core)
 
 # --- Второй язык: тексты в коде по-русски, английский — перевод Qt Linguist --
 # i18n/tamic_en.ts обновляется целью update_translations (lupdate по исходникам и QML

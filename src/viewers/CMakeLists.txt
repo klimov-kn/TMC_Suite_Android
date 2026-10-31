@@ -31,7 +31,6 @@ qt_add_library(tamic_viewers STATIC)
 qt_add_qml_module(tamic_viewers
     URI Tamic.Viewers
     VERSION 1.0
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/Tamic/Viewers
     RESOURCE_PREFIX /qt/qml
     SOURCES
         viewers.h viewers.cpp

@@ -14,26 +14,25 @@ C++ · Qt 6 · Qt RHI · Android 9+ (arm64-v8a)
 
 ---
 
-> **This is an alpha version, 0.1.0-alpha4.** It is the first public release of the app.
-
 ## Overview
 
 **TMC Suite** is an authorial scientific software package by **K. N. Klimov** for electrodynamic
 computation and visualization of planar structures (H-polarization and X-mode).
 
 This repository is the **Android edition**: one app in place of the desktop programs. It calculates
-`.tpl` tasks on the phone itself, shows the results and needs no internet connection. It is meant for
-small tasks and for viewing results on the go. Large calculations are more convenient on a computer.
+`.tpl` tasks on the phone itself, shows the results and needs no internet connection. Version 2.0
+corresponds to the Windows edition 5.0 and the Linux edition 2.0: the same computational code and the
+same file formats. A task calculated on one system opens on another.
 
 | Desktop program | In the app | What it does |
 |---|---|---|
 | PlanarRT_H | Kernel H | Calculation, H-polarization |
-| PlanarRT_X | Kernel X | Calculation, X-mode, including plasma: density, magnetization, losses |
-| TMCGROUT | S-matrix chart | \|S\|, losses in dB, VSWR, phase over frequency |
+| PlanarRT_X | Kernel X | Calculation, X-mode, including magnetized plasma |
+| TMCGROUT | S-matrix chart | \|S\|, losses in dB, VSWR, phase, unwrapped phase |
 | TMC_DN | Pattern chart | Radiation pattern in Cartesian and polar coordinates, directivity |
 | TMCROS | Signals chart | Port signals over time |
-| FieldView | Field screen | Field step by step in 3D, on Qt RHI |
-| TPL Designer | TPL Designer tab | Build a task without typing: domain, geometry, materials, ports, signals, checks, sample library |
+| FieldView | Field screen | Field step by step in 3D on Qt RHI, GIF export |
+| TPL Designer | TPL Designer tab | A task without typing, sample library, choice of S-parameters, memory indicator |
 
 Also in the app:
 
@@ -49,12 +48,11 @@ Also in the app:
 |---|---|---|
 | <img src=".github/images/tpl_designer_en.png" width="260" alt="TPL Designer"> | <img src=".github/images/calculation_en.png" width="260" alt="Calculation"> | <img src=".github/images/pattern_en.png" width="260" alt="Radiation pattern"> |
 
-| Comparing calculations | Field | Results |
+| Sample library | Choosing S-parameters | Field |
 |---|---|---|
-| <img src=".github/images/compare_en.png" width="260" alt="Comparing calculations"> | <img src=".github/images/field_en.png" width="260" alt="Field"> | <img src=".github/images/results_en.png" width="260" alt="Results"> |
+| <img src=".github/images/samples_en.png" width="260" alt="Sample library"> | <img src=".github/images/run_plan_en.png" width="260" alt="Choosing S-parameters"> | <img src=".github/images/field_en.png" width="260" alt="Field"> |
 
-The screenshots are taken with the desktop build of the same app, so the kernel log and the graphics
-line differ slightly from what a phone shows.
+The screenshots are taken with the desktop build of the same app.
 
 ## Installation
 
@@ -66,19 +64,16 @@ here once it is approved.
 | System | Android 9 or newer |
 | Processor | 64-bit ARM (arm64-v8a); 32-bit devices are not supported |
 | Memory | 4 GB of RAM or more, 8 GB or more for comfortable work |
-| Download size | about 31 MB |
+| Download size | about 30 MB |
 
-1. Download `TMC-Suite-0.1.0-alpha4-arm64-v8a.apk` on the phone and open it.
+1. Download the `.apk` file on the phone and open it.
 2. Android asks for permission to install from this source. Allow it for your browser and go back.
 3. If Google Play Protect warns about an unknown developer, choose **More details → Install anyway**.
 4. After the installation you can switch the permission off again.
 
 A copy from a store and a copy from this page can be signed with different keys. To switch between them,
-remove the installed app first.
-
-Compare the file with `SHA256SUMS.txt` from the release if you want to check it. The certificate of
-the APK is `CN=TMC Suite upload, O=TAMIC, C=RU`, SHA-256
-`446a532425cfe31c6d3b577a7aa66b0893039a2880b65bfa42c1633dcf6b3660`.
+remove the installed app first. Compare the file with `SHA256SUMS.txt` from the release if you want to
+check it.
 
 ## Privacy
 
@@ -88,14 +83,11 @@ service and a wake lock, so that a calculation keeps running with the screen off
 
 ## Known limitations
 
-- **Windows edition.** Results of this version do not yet match the Windows edition 5.0 in every case.
-  The next update will bring them in line. File formats are the same.
-- **Pinch gesture.** On charts, in the field and in the geometry view a curve can jump aside during a
-  pinch, and the field can turn.
-- **TPL Designer** has no page for several `#STEP` blocks with different active ports and for choosing
-  the S-matrix columns.
-- **Task size.** A grid takes about 32 bytes per node in kernel H and 96 bytes per node in kernel X.
-  Grids of a million nodes and more have not been measured on a phone.
+- **Task size** is limited by the phone memory: about 32 bytes per node in kernel H and 96 bytes per
+  node in kernel X. Grids of a million nodes and more have not been measured on a phone.
+- **No calculation on a video card** and no STEP models: the desktop editions have both.
+- **Not transferred from the desktop viewers yet:** recalculation of `.t` signals into an S-matrix,
+  curves by expressions, deviation of a radiation pattern, printing.
 
 ## Input format
 
@@ -104,8 +96,9 @@ Tasks are text files in the `.tpl` language, the same as in the desktop editions
 
 ## Building
 
-The build runs on Windows. The Android app needs a desktop Qt as well, because the host tools come from
-it.
+The build runs on Windows, and **the path to the sources must not contain spaces**: `androiddeployqt`
+does not find the QML modules otherwise. The Android app needs a desktop Qt as well, because the host
+tools come from it.
 
 | Tool | Version |
 |---|---|
@@ -124,20 +117,22 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 & $cmake --preset android-arm64
 & $cmake --build --preset android-arm64
 
-# release APK, not signed
+# release APK and AAB, not signed
 & $cmake --preset android-arm64-release
-& $cmake --build --preset android-arm64-release --target apk
+& $cmake --build --preset android-arm64-release --target apk aab
 ```
 
-The first build takes about 15 minutes because Gradle downloads itself and its plugins. The APK is in
-`build\<preset>\src\app\android-build\build\outputs\apk\`.
+The first build takes about 15 minutes because Gradle downloads itself and its plugins. The build gives
+no compiler warnings. The packages are in `build\<preset>\src\app\android-build\build\outputs\`.
 
 To sign a release, set `QT_ANDROID_KEYSTORE_PATH`, `QT_ANDROID_KEYSTORE_ALIAS`,
 `QT_ANDROID_KEYSTORE_STORE_PASS` and `QT_ANDROID_KEYSTORE_KEY_PASS`, then configure with
-`-DQT_ANDROID_SIGN_APK=ON`. Keep the key outside the repository.
+`-DQT_ANDROID_SIGN_APK=ON -DQT_ANDROID_SIGN_AAB=ON`. Keep the key outside the repository.
 
-The `desktop` preset builds the same app for Windows with MinGW. It is handy for debugging the interface
-and the kernels without a phone.
+The `desktop` preset builds the same app on Linux with Qt 6.11.1 in `~/Qt`. It is handy for debugging the
+interface and the kernels without a phone.
+
+More about the code: [Android edition](https://www.tamic.ru/docs/platforms/android.html).
 
 ## Repository layout
 
@@ -145,11 +140,12 @@ and the kernels without a phone.
 |---|---|
 | `src/app` | App: screens (QML), task storage, kernel launch, built-in guide, examples, fonts |
 | `src/kernels` | Build of the kernels for Android, compatibility layer |
-| `src/win_src` | Computational code of the Windows edition, the files the kernels are built from |
+| `src/win_src` | Computational code, shared with the Linux and Windows editions |
 | `src/viewers` | Charts: S-matrix, radiation pattern, signals |
 | `src/fieldview` | Field on Qt RHI, shaders |
-| `src/tpl_designer` | TPL Designer |
-| `src/ui` | Design tokens shared by the screens |
+| `src/tpl_designer` | TPL Designer: task generator (`core`), model and canvas (`backend`), pages (`qml`) |
+| `src/ui` | Touch gestures and design tokens shared by the screens |
+| `src/desktop_qml` | Folder picker of the desktop build |
 | `platforms/android` | Manifest, Java service for the calculation, icons |
 | `i18n` | English translation |
 
@@ -172,9 +168,6 @@ and the kernels without a phone.
 [Apache License 2.0](LICENSE). See also [`NOTICE`](NOTICE). If you publish results obtained with the
 app, please cite the authors and the project.
 
-The sources in this repository are under Apache 2.0. The **Help → Licenses** screen of build 0.1.0-alpha4
-still shows the earlier license text of the project; the next build will show the new one.
-
 ---
 
 <div align="center">
@@ -193,26 +186,25 @@ C++ · Qt 6 · Qt RHI · Android 9+ (arm64-v8a)
 
 ---
 
-> **Это альфа-версия 0.1.0-alpha4**, первый публичный выпуск приложения.
-
 ## О проекте
 
 **TMC Suite** — авторский научный пакет программ **К. Н. Климова** для электродинамических расчётов и
 визуализации планарных структур (H-поляризация и X-мода).
 
 Этот репозиторий — **версия для Android**: одно приложение вместо настольных программ. Оно считает
-задания `.tpl` прямо на телефоне, показывает результаты и не требует интернета. Приложение рассчитано
-на небольшие задачи и просмотр результатов в дороге; большие расчёты удобнее вести на компьютере.
+задания `.tpl` прямо на телефоне, показывает результаты и не требует интернета. Версия 2.0 соответствует
+Windows-версии 5.0 и Linux-версии 2.0: тот же расчётный код и те же форматы файлов. Задание, посчитанное
+на одной системе, открывается на другой.
 
 | Настольная программа | В приложении | Что делает |
 |---|---|---|
 | PlanarRT_H | Ядро H | Расчёт, H-поляризация |
-| PlanarRT_X | Ядро X | Расчёт, X-мода, включая плазму: плотность, намагниченность, потери |
-| TMCGROUT | График S-матрицы | \|S\|, потери в дБ, КСВН, фаза по частоте |
+| PlanarRT_X | Ядро X | Расчёт, X-мода, включая подмагниченную плазму |
+| TMCGROUT | График S-матрицы | \|S\|, потери в дБ, КСВН, фаза, разворот фазы |
 | TMC_DN | График ДН | Диаграмма направленности в декартовых и полярных координатах, КНД |
 | TMCROS | График сигналов | Сигналы на портах во времени |
-| FieldView | Экран «Поле» | Поле по тактам в 3D, на Qt RHI |
-| TPL Designer | Вкладка TPL Designer | Задание без набора текста: область, геометрия, материалы, порты, сигналы, проверки, библиотека образцов |
+| FieldView | Экран «Поле» | Поле по тактам в 3D на Qt RHI, экспорт GIF |
+| TPL Designer | Вкладка TPL Designer | Задание без набора текста, библиотека образцов, выбор S-параметров, индикатор памяти |
 
 Ещё в приложении:
 
@@ -227,12 +219,11 @@ C++ · Qt 6 · Qt RHI · Android 9+ (arm64-v8a)
 |---|---|---|
 | <img src=".github/images/tpl_designer_ru.png" width="260" alt="TPL Designer"> | <img src=".github/images/calculation_ru.png" width="260" alt="Расчёт"> | <img src=".github/images/pattern_ru.png" width="260" alt="Диаграмма направленности"> |
 
-| Сравнение расчётов | Поле | Результаты |
+| Библиотека образцов | Выбор S-параметров | Поле |
 |---|---|---|
-| <img src=".github/images/compare_ru.png" width="260" alt="Сравнение расчётов"> | <img src=".github/images/field_ru.png" width="260" alt="Поле"> | <img src=".github/images/results_ru.png" width="260" alt="Результаты"> |
+| <img src=".github/images/samples_ru.png" width="260" alt="Библиотека образцов"> | <img src=".github/images/run_plan_ru.png" width="260" alt="Выбор S-параметров"> | <img src=".github/images/field_ru.png" width="260" alt="Поле"> |
 
-Снимки сделаны настольной сборкой того же приложения, поэтому журнал ядра и строка о графике немного
-отличаются от того, что покажет телефон.
+Снимки сделаны настольной сборкой того же приложения.
 
 ## Установка
 
@@ -244,9 +235,9 @@ C++ · Qt 6 · Qt RHI · Android 9+ (arm64-v8a)
 | Система | Android 9 и новее |
 | Процессор | 64-битный ARM (arm64-v8a); 32-битные устройства не поддерживаются |
 | Память | от 4 ГБ оперативной памяти, комфортно — от 8 ГБ |
-| Размер файла | около 31 МБ |
+| Размер файла | около 30 МБ |
 
-1. Скачайте на телефон файл `TMC-Suite-0.1.0-alpha4-arm64-v8a.apk` и откройте его.
+1. Скачайте на телефон файл `.apk` и откройте его.
 2. Android попросит разрешение на установку из этого источника. Разрешите его для браузера и вернитесь
    назад.
 3. Если Google Play Защита предупредит о неизвестном разработчике, выберите **«Подробнее» → «Всё равно
@@ -254,10 +245,7 @@ C++ · Qt 6 · Qt RHI · Android 9+ (arm64-v8a)
 4. После установки разрешение можно снова выключить.
 
 Копия из магазина и копия с этой страницы могут быть подписаны разными ключами. Чтобы перейти с одной на
-другую, сначала удалите установленное приложение.
-
-Файл можно проверить по `SHA256SUMS.txt` из выпуска. Сертификат APK: `CN=TMC Suite upload, O=TAMIC, C=RU`,
-SHA-256 `446a532425cfe31c6d3b577a7aa66b0893039a2880b65bfa42c1633dcf6b3660`.
+другую, сначала удалите установленное приложение. Файл можно проверить по `SHA256SUMS.txt` из выпуска.
 
 ## Конфиденциальность
 
@@ -267,14 +255,11 @@ SHA-256 `446a532425cfe31c6d3b577a7aa66b0893039a2880b65bfa42c1633dcf6b3660`.
 
 ## Известные ограничения
 
-- **Windows-версия.** Результаты этой версии пока совпадают с Windows-версией 5.0 не во всех случаях.
-  Следующее обновление устранит расхождения. Форматы файлов те же.
-- **Жест щипка.** На графиках, в поле и в геометрии кривая при щипке может смещаться в сторону, а поле
-  поворачиваться.
-- **TPL Designer** пока не умеет несколько блоков `#STEP` с разными активными портами и выбор столбцов
-  S-матрицы.
-- **Размер задачи.** Сетка занимает около 32 байт на узел в ядре H и 96 байт на узел в ядре X. Сетки от
-  миллиона узлов на телефоне не замерялись.
+- **Размер задачи** ограничен памятью телефона: около 32 байт на узел в ядре H и 96 байт на узел в ядре X.
+  Сетки от миллиона узлов на телефоне не замерялись.
+- **Нет расчёта на видеокарте** и моделей STEP: они есть в настольных версиях.
+- **Из настольных вьюверов пока не перенесены:** пересчёт сигналов `.t` в S-матрицу, кривые по выражениям,
+  девиация диаграммы направленности, печать.
 
 ## Формат входных данных
 
@@ -283,7 +268,8 @@ SHA-256 `446a532425cfe31c6d3b577a7aa66b0893039a2880b65bfa42c1633dcf6b3660`.
 
 ## Сборка
 
-Сборка идёт на Windows. Приложению для Android нужен и настольный Qt: из него берутся инструменты сборки.
+Сборка идёт на Windows, и **в пути к исходникам не должно быть пробелов**: иначе `androiddeployqt` не находит
+модули QML. Приложению для Android нужен и настольный Qt: из него берутся инструменты сборки.
 
 | Инструмент | Версия |
 |---|---|
@@ -302,20 +288,22 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 & $cmake --preset android-arm64
 & $cmake --build --preset android-arm64
 
-# выпускной APK без подписи
+# выпускные APK и AAB без подписи
 & $cmake --preset android-arm64-release
-& $cmake --build --preset android-arm64-release --target apk
+& $cmake --build --preset android-arm64-release --target apk aab
 ```
 
-Первая сборка идёт около 15 минут: Gradle скачивает себя и свои модули. Готовый APK лежит в
-`build\<пресет>\src\app\android-build\build\outputs\apk\`.
+Первая сборка идёт около 15 минут: Gradle скачивает себя и свои модули. Предупреждений компилятора при сборке
+нет. Готовые пакеты лежат в `build\<пресет>\src\app\android-build\build\outputs\`.
 
 Чтобы подписать выпуск, задайте `QT_ANDROID_KEYSTORE_PATH`, `QT_ANDROID_KEYSTORE_ALIAS`,
-`QT_ANDROID_KEYSTORE_STORE_PASS` и `QT_ANDROID_KEYSTORE_KEY_PASS`, затем выполните настройку с ключом
-`-DQT_ANDROID_SIGN_APK=ON`. Храните ключ вне репозитория.
+`QT_ANDROID_KEYSTORE_STORE_PASS` и `QT_ANDROID_KEYSTORE_KEY_PASS`, затем выполните настройку с ключами
+`-DQT_ANDROID_SIGN_APK=ON -DQT_ANDROID_SIGN_AAB=ON`. Храните ключ вне репозитория.
 
-Пресет `desktop` собирает то же приложение для Windows через MinGW. Это удобно для отладки интерфейса и
+Пресет `desktop` собирает то же приложение на Linux с Qt 6.11.1 в `~/Qt`. Это удобно для отладки интерфейса и
 ядер без телефона.
+
+Подробнее о коде: [версия для Android](https://www.tamic.ru/docs/platforms/android.html).
 
 ## Структура репозитория
 
@@ -323,11 +311,12 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 |---|---|
 | `src/app` | Приложение: экраны (QML), хранение заданий, запуск ядер, встроенное руководство, примеры, шрифты |
 | `src/kernels` | Сборка ядер для Android, слой совместимости |
-| `src/win_src` | Расчётный код Windows-версии: файлы, из которых собираются ядра |
+| `src/win_src` | Расчётный код, общий с версиями для Linux и Windows |
 | `src/viewers` | Графики: S-матрица, диаграмма направленности, сигналы |
 | `src/fieldview` | Поле на Qt RHI, шейдеры |
-| `src/tpl_designer` | TPL Designer |
-| `src/ui` | Общие параметры оформления экранов |
+| `src/tpl_designer` | TPL Designer: генератор заданий (`core`), модель и холст (`backend`), страницы (`qml`) |
+| `src/ui` | Жесты и параметры оформления экранов |
+| `src/desktop_qml` | Выбор папки в настольной сборке |
 | `platforms/android` | Манифест, служба расчёта на Java, значки |
 | `i18n` | Английский перевод |
 
@@ -349,6 +338,3 @@ $cmake = "C:\Qt\Tools\CMake_64\bin\cmake.exe"
 
 [Apache License 2.0](LICENSE). См. также [`NOTICE`](NOTICE). Если вы публикуете результаты, полученные в
 приложении, пожалуйста, процитируйте авторов и проект.
-
-Исходники в этом репозитории распространяются по Apache 2.0. Экран **«Справка» → «Лицензии»** сборки
-0.1.0-alpha4 ещё показывает прежний текст лицензии проекта; в следующей сборке будет новый.

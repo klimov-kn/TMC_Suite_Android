@@ -24,7 +24,8 @@ qt_add_executable(tamic ${TAMIC_APP_SOURCES})
 if(ANDROID)
     set(TAMIC_DESKTOP_QML "")
 else()
-    set(TAMIC_DESKTOP_QML qml/FolderPicker.qml)
+    set(TAMIC_DESKTOP_QML ../desktop_qml/FolderPicker.qml)
+    set_source_files_properties(../desktop_qml/FolderPicker.qml PROPERTIES QT_RESOURCE_ALIAS FolderPicker.qml)
 endif()
 
 # Theme.qml — синглтон с токенами оформления.
@@ -33,6 +34,7 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(tamic
     URI Tamic
     VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     QML_FILES
         qml/Main.qml
         qml/Theme.qml
@@ -122,6 +124,11 @@ qt_add_resources(tamic tamic_examples
         ${_tamic_examples}/lens/lens3.tpl
 )
 
+# androiddeployqt ищет QML-модули в <префикс>/qml: каталог сборки — один из префиксов.
+if(ANDROID)
+    list(APPEND CMAKE_FIND_ROOT_PATH ${CMAKE_BINARY_DIR})
+endif()
+
 set_target_properties(tamic PROPERTIES
     OUTPUT_NAME tamic
     WIN32_EXECUTABLE TRUE
@@ -137,7 +144,36 @@ set_target_properties(tamic PROPERTIES
     # libtmc_rt?.so должны лежать файлами в nativeLibraryDir, чтобы их можно было
     # запустить процессом.
     QT_ANDROID_LEGACY_PACKAGING TRUE
+    # Сканер импортов QML смотрит src/app; FolderPicker.qml с модулем QtQuick.Dialogs лежит вне этой
+    # папки: он нужен только настольной сборке и потащил бы в APK стили Controls.
+    QT_QML_IMPORT_PATH "${CMAKE_BINARY_DIR}/qml"
 )
+
+# Точный состав Qt в APK: без отладочных модулей qmltooling (один из них тянет Qt6Quick3DUtils
+# под GPL), без TLS и сведений о сети, которые приложению без доступа к сети не нужны.
+if(ANDROID)
+    set_target_properties(tamic PROPERTIES QT_ANDROID_DEPLOYMENT_DEPENDENCIES "
+lib/libQt6Core_arm64-v8a.so;
+lib/libQt6Gui_arm64-v8a.so;
+lib/libQt6Network_arm64-v8a.so;
+lib/libQt6OpenGL_arm64-v8a.so;
+lib/libQt6QmlMeta_arm64-v8a.so;
+lib/libQt6QmlModels_arm64-v8a.so;
+lib/libQt6QmlWorkerScript_arm64-v8a.so;
+lib/libQt6Qml_arm64-v8a.so;
+lib/libQt6QuickLayouts_arm64-v8a.so;
+lib/libQt6QuickShapes_arm64-v8a.so;
+lib/libQt6QuickTemplates2_arm64-v8a.so;
+lib/libQt6Quick_arm64-v8a.so;
+lib/libQt6Svg_arm64-v8a.so;
+plugins/iconengines/libplugins_iconengines_qsvgicon_arm64-v8a.so;
+plugins/imageformats/libplugins_imageformats_qgif_arm64-v8a.so;
+plugins/imageformats/libplugins_imageformats_qico_arm64-v8a.so;
+plugins/imageformats/libplugins_imageformats_qjpeg_arm64-v8a.so;
+plugins/imageformats/libplugins_imageformats_qsvg_arm64-v8a.so;
+plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so;
+")
+endif()
 
 target_compile_definitions(tamic PRIVATE TAMIC_VERSION_STRING="${TAMIC_VERSION_NAME}")
 target_link_libraries(tamic PRIVATE Qt6::Quick)

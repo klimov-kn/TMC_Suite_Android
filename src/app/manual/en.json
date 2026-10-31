@@ -249,7 +249,7 @@
     "type": "list",
     "items": [
      "Play/pause, step forward and back, time step slider; speed — a slider from 1 to 30 frames per second.",
-     "One finger — rotate, pinch — zoom, two fingers — pan, double tap — the initial view.",
+     "One finger turns, a pinch zooms around the point between the fingers, two fingers together move, a double tap restores the initial view.",
      "Layer: field, ε, and for X tasks the plasma N, Y, B.",
      "View: relief (off — top view), fill, wireframe, topology; 3D geometry — blocks with height or flat; scale per time step or over all time steps.",
      "Export animation (GIF) — an animated picture saved to the task folder; then Share — to a messenger, e-mail or cloud storage."
@@ -268,7 +268,7 @@
   "blocks": [
    {
     "type": "p",
-    "text": "TPL Designer builds a .tpl task step by step. At the top is the folder where the task will be written (you can change it). Steps are tabs, in any order: <b>Task</b> → <b>Geometry</b> → <b>Objects</b> → <b>Output</b> → <b>Check</b>."
+    "text": "TPL Designer builds a .tpl task step by step. At the top is the folder the task is written to (you can change it). The steps are tabs, in any order: <b>Task</b> → <b>Geometry</b> → <b>Objects</b> → <b>Compute</b> → <b>Output</b> → <b>Check</b>."
    },
    {
     "type": "img",
@@ -277,7 +277,12 @@
    },
    {
     "type": "p",
-    "text": "<b>Sample</b> opens a library of ready tasks (waveguides, antennas, microstrip, plasma, lab tasks) — a convenient start: open one and change the dimensions. Open reads a ready .tpl from the folder."
+    "text": "The <b>Sample</b> button opens a library of ready tasks with pictures: waveguides, antennas, microstrip, plasma, lab tasks. Choose a section or search for a sample. The sample card has parameters, the check, the passport and the kernel numbers. <b>Open in the editor</b> moves it to the steps. Open reads a ready .tpl from the folder."
+   },
+   {
+    "type": "img",
+    "src": "designer_samples.png",
+    "text": "Sample library"
    },
    {
     "type": "img",
@@ -287,10 +292,14 @@
    {
     "type": "list",
     "items": [
-     "Tools at the bottom: select, rectangle, circle, line, outline, arc, port.",
-     "Draw with your finger: dragging draws, a tap selects, a selected shape can be dragged.",
-     "Two fingers — zoom and pan; snapping to the DELTA grid and to shape points.",
-     "+ By numbers — add a shape with exact dimensions."
+     "The <b>View</b> tool is on by default: a finger moves the view, a tap selects an object.",
+     "<b>Select</b> moves the selected object and resizes it by its points.",
+     "When objects overlap, each next tap takes the next object.",
+     "The icon of two squares turns on selection of several objects: a group can be moved, copied and deleted, and lines can be joined into one shape.",
+     "The other tools draw: rectangle, circle, line, polygon, arc, port.",
+     "Two fingers zoom and move; snapping to the DELTA grid and to shape points.",
+     "“+ By numbers” adds a shape with exact sizes, a port on a side, a slice of an STL or OBJ model from the task folder, rounded corners.",
+     "The <b>Next</b> button goes to the next step."
     ]
    },
    {
@@ -300,7 +309,16 @@
    },
    {
     "type": "p",
-    "text": "The Check step shows notes (errors and warnings), the file text and a summary of what will be calculated. <b>Generate</b> writes the task to the folder. After that, Open appears at the bottom — it takes you to the task on the Tasks tab, where you can calculate it right away."
+    "text": "<b>Compute</b> sets which S-parameters you need. One run excites one port and gives one column of the S-matrix: to get S11 and S21, tick port 1; for the whole matrix tick all ports. Geometry variants and object rotation by steps are there too."
+   },
+   {
+    "type": "img",
+    "src": "designer_plan.png",
+    "text": "Compute step: choosing the S-parameters"
+   },
+   {
+    "type": "p",
+    "text": "The Check step shows the issues, the memory ring of the phone (used, calculation grid, radiation pattern, free), the file text and the “what will be computed” summary. <b>Generate</b> writes the task to the folder, <b>Save as sample</b> puts it into My samples. After writing, Open appears at the bottom: it goes to the task on the Tasks tab, where you can run it at once."
    },
    {
     "type": "img",

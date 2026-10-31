@@ -436,10 +436,9 @@ void TplDesignerModel::followTimeWindow()
 
 void TplDesignerModel::setSetting(const QString &key, const QVariant &value)
 {
-    if (key == QLatin1String("timing") || key == QLatin1String("sWide")) {
+    if (key == QLatin1String("sWide")) {
         snapshot();
-        (key == QLatin1String("timing") ? m_project.output.timingReport
-                                        : m_project.output.sMatrixLimitWideband) = value.toBool();
+        m_project.output.sMatrixLimitWideband = value.toBool();
         refresh();
         return;
     }
@@ -490,7 +489,6 @@ void TplDesignerModel::setSetting(const QString &key, const QVariant &value)
     } else if (key == QLatin1String("patternFile")) { o.patternFile = value.toString().trimmed();
     } else if (key == QLatin1String("pMin")) { if (needNumber()) o.patternTMin = d;
     } else if (key == QLatin1String("pMax")) { if (needNumber()) o.patternTMax = d;
-    } else if (key == QLatin1String("timing")) { o.timingReport = value.toBool();
     }
     // Как pullFromForm оригинала: частоты из полей и окно снятия за временем счёта.
     m_project.freqs = collectFreqs();
@@ -503,7 +501,6 @@ QVariantMap TplDesignerModel::settings() const
     const Project &p = m_project;
     const OutputSettings &o = p.output;
     QVariantMap m;
-    m.insert(QStringLiteral("timing"), m_project.output.timingReport);
     m.insert(QStringLiteral("sWide"), m_project.output.sMatrixLimitWideband);
     m.insert(QStringLiteral("name"), p.name);
     m.insert(QStringLiteral("description"), p.description);
@@ -545,7 +542,6 @@ QVariantMap TplDesignerModel::settings() const
     m.insert(QStringLiteral("patternFile"), o.patternFile);
     m.insert(QStringLiteral("pMin"), num(o.patternTMin));
     m.insert(QStringLiteral("pMax"), num(o.patternTMax));
-    m.insert(QStringLiteral("timing"), o.timingReport);
 
     // Подсказки страницы «Вывод» — те же, что у оригинала (refreshAll).
     QString fh;

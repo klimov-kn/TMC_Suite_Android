@@ -72,6 +72,8 @@ class KernelRunner : public QObject
     Q_PROPERTY(QString logText READ logText NOTIFY logChanged)
     Q_PROPERTY(int exitCode READ exitCode NOTIFY runningChanged)
     Q_PROPERTY(QString mode READ mode NOTIFY runningChanged)
+    /// Отчёт о времени расчёта рядом с результатами (ключ -Time ядра); выбор запоминается.
+    Q_PROPERTY(bool timeReport READ timeReport WRITE setTimeReport NOTIFY timeReportChanged)
 
 public:
     enum Code { Ok = 0, TplError = 1, CalcError = 2, Stopped = 3 };
@@ -89,6 +91,9 @@ public:
     // Остановка: SIGTERM, через 2 с — SIGKILL (Windows — сразу kill: консольная
     // программа сообщение WM_CLOSE не получает). Код — 3.
     Q_INVOKABLE void cancel();
+
+    bool timeReport() const { return m_timeReport; }
+    void setTimeReport(bool on);
 
     bool running() const { return m_running; }
     double progress() const { return m_progress.percent(); }
@@ -110,12 +115,14 @@ public:
     void clearLog();
 
 signals:
+    void timeReportChanged();
     void runningChanged();
     void progressChanged();   // не чаще 5 раз в секунду
     void logChanged();        // не чаще 5 раз в секунду
     void finished(int code);
 
 private:
+    bool m_timeReport = false;
     void readStdout();
     void readStderr();
     void handleLine(const QString &line, bool fromStdout);
