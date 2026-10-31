@@ -140,7 +140,7 @@ set_target_properties(tamic PROPERTIES
 )
 
 target_compile_definitions(tamic PRIVATE TAMIC_VERSION_STRING="${TAMIC_VERSION_NAME}")
-target_link_libraries(tamic PRIVATE Qt6::Quick Qt6::QuickControls2)
+target_link_libraries(tamic PRIVATE Qt6::Quick)
 if(ANDROID)
     target_link_libraries(tamic PRIVATE Qt6::CorePrivate log)
     # Сегменты ELF по 16 КБ (Google Play, Android 15+; решение M33) — как у библиотек Qt.

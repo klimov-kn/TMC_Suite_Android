@@ -361,39 +361,6 @@ inline LONG RegQueryValueExA(HKEY key, const char* valueName, DWORD* /*reserved*
 inline LONG RegCloseKey(HKEY) { return ERROR_SUCCESS; }
 
 // --- Командная строка процесса ------------------------------------------------
-/// Ядро ищет в ней ключ /GPU. Собираем строку из аргументов так, как её видит
-/// Windows: через пробел, слова с пробелами — в кавычках.
-inline const char* GetCommandLineA()
-{
-    static std::string line;
-    static bool done = false;
-    if (done)
-        return line.c_str();
-    done = true;
-    if (FILE* f = std::fopen("/proc/self/cmdline", "rb")) {
-        std::string raw;
-        char buf[4096];
-        size_t n;
-        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
-            raw.append(buf, n);
-        std::fclose(f);
-        size_t i = 0;
-        while (i < raw.size()) {
-            const size_t e = raw.find('\0', i);
-            const std::string arg = raw.substr(i, (e == std::string::npos ? raw.size() : e) - i);
-            if (!line.empty())
-                line += ' ';
-            if (arg.find_first_of(" \t") != std::string::npos)
-                line += '"' + arg + '"';
-            else
-                line += arg;
-            if (e == std::string::npos)
-                break;
-            i = e + 1;
-        }
-    }
-    return line.c_str();
-}
 
 // --- Полный путь ---------------------------------------------------------------
 /// Как в Windows: файл может не существовать; относительный путь достраивается от

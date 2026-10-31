@@ -30,7 +30,7 @@ else()
     set(_fv_standalone OFF)
 endif()
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick QuickControls2 ShaderTools)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools)
 if(_fv_standalone)
     qt_standard_project_setup(REQUIRES 6.7)
     qt_policy(SET QTP0004 NEW)
@@ -47,7 +47,6 @@ if(NOT COMMAND tamic_set_warnings)
     endfunction()
 endif()
 
-option(TAMIC_FIELDVIEW_DEMO  "Собрать fieldview_demo и fieldview_capture (только desktop)" ${_fv_standalone})
 
 # --- Ядро: файлы поля и топологии ------------------------------------------
 add_library(tamic_fieldview_core STATIC
@@ -127,7 +126,7 @@ target_include_directories(tamic_fieldview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rh
 target_link_libraries(tamic_fieldview PUBLIC
     tamic_fieldview_core tamic_tpl_theme
     # QRhi (rhi/qrhi.h) в Qt 6.11 — среди закрытых заголовков QtGui.
-    Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+    Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 tamic_set_warnings(tamic_fieldview)
 
 # Подключение одной целью: статические плагины модулей и их импорт
@@ -138,11 +137,4 @@ target_sources(tamic_fieldview_module INTERFACE
 target_link_libraries(tamic_fieldview_module INTERFACE
     tamic_fieldviewplugin tamic_tpl_themeplugin tamic_fieldview)
 
-# --- Настольная проверка ------------------------------------------------------
-if(TAMIC_FIELDVIEW_DEMO AND NOT ANDROID AND NOT IOS)
-    add_subdirectory(demo)
-    add_executable(fieldview_capture tools/fieldview_capture.cpp)
-    target_link_libraries(fieldview_capture PRIVATE tamic_fieldview_core)
-    tamic_set_warnings(fieldview_capture)
-endif()
 

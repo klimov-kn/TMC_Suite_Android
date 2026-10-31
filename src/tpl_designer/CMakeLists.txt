@@ -5,7 +5,6 @@
 #                          порождения текста .tpl НЕ меняется.
 #   tamic_tpl_designer   — QML-модуль TamicTplDesigner: страница TplDesignerPage
 #                          (свойство taskFolder, сигнал saved(string tplPath)).
-#   tpl_designer_demo    — настольная проверка страницы и снимки экрана (только desktop).
 #
 # Подключение в корневом CMakeLists.txt (после add_subdirectory(src/app)):
 #     add_subdirectory(src/tpl_designer)
@@ -47,7 +46,6 @@ if(NOT COMMAND tamic_set_warnings)
     endfunction()
 endif()
 
-option(TAMIC_TPL_DESIGNER_DEMO  "Собрать tpl_designer_demo (только desktop)" ${_tpld_standalone})
 
 # --- Ядро генератора --------------------------------------------------------
 # Перенесено из TPL_Designer/src/core без изменений логики.
@@ -194,8 +192,4 @@ target_sources(tamic_tpl_designer_module INTERFACE
 target_link_libraries(tamic_tpl_designer_module INTERFACE
     tamic_tpl_designerplugin tamic_tpl_themeplugin tamic_tpl_designer)
 
-# --- Настольная проверка страницы и снимки экрана ---------------------------
-if(TAMIC_TPL_DESIGNER_DEMO AND NOT ANDROID AND NOT IOS)
-    add_subdirectory(demo)
-endif()
 
