@@ -152,27 +152,31 @@ set_target_properties(tamic PROPERTIES
 # Точный состав Qt в APK: без отладочных модулей qmltooling (один из них тянет Qt6Quick3DUtils
 # под GPL), без TLS и сведений о сети, которые приложению без доступа к сети не нужны.
 if(ANDROID)
-    set_target_properties(tamic PROPERTIES QT_ANDROID_DEPLOYMENT_DEPENDENCIES "
-lib/libQt6Core_arm64-v8a.so;
-lib/libQt6Gui_arm64-v8a.so;
-lib/libQt6Network_arm64-v8a.so;
-lib/libQt6OpenGL_arm64-v8a.so;
-lib/libQt6QmlMeta_arm64-v8a.so;
-lib/libQt6QmlModels_arm64-v8a.so;
-lib/libQt6QmlWorkerScript_arm64-v8a.so;
-lib/libQt6Qml_arm64-v8a.so;
-lib/libQt6QuickLayouts_arm64-v8a.so;
-lib/libQt6QuickShapes_arm64-v8a.so;
-lib/libQt6QuickTemplates2_arm64-v8a.so;
-lib/libQt6Quick_arm64-v8a.so;
-lib/libQt6Svg_arm64-v8a.so;
-plugins/iconengines/libplugins_iconengines_qsvgicon_arm64-v8a.so;
-plugins/imageformats/libplugins_imageformats_qgif_arm64-v8a.so;
-plugins/imageformats/libplugins_imageformats_qico_arm64-v8a.so;
-plugins/imageformats/libplugins_imageformats_qjpeg_arm64-v8a.so;
-plugins/imageformats/libplugins_imageformats_qsvg_arm64-v8a.so;
-plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so;
-")
+    set(_tamic_qt_deps
+        jar/Qt6Android.jar
+        jar/Qt6AndroidNetwork.jar
+        jar/Qt6AndroidQuick.jar
+        lib/libQt6Core_arm64-v8a.so
+        lib/libQt6Gui_arm64-v8a.so
+        lib/libQt6Network_arm64-v8a.so
+        lib/libQt6OpenGL_arm64-v8a.so
+        lib/libQt6QmlMeta_arm64-v8a.so
+        lib/libQt6QmlModels_arm64-v8a.so
+        lib/libQt6QmlWorkerScript_arm64-v8a.so
+        lib/libQt6Qml_arm64-v8a.so
+        lib/libQt6QuickLayouts_arm64-v8a.so
+        lib/libQt6QuickShapes_arm64-v8a.so
+        lib/libQt6QuickTemplates2_arm64-v8a.so
+        lib/libQt6Quick_arm64-v8a.so
+        lib/libQt6Svg_arm64-v8a.so
+        plugins/iconengines/libplugins_iconengines_qsvgicon_arm64-v8a.so
+        plugins/imageformats/libplugins_imageformats_qgif_arm64-v8a.so
+        plugins/imageformats/libplugins_imageformats_qico_arm64-v8a.so
+        plugins/imageformats/libplugins_imageformats_qjpeg_arm64-v8a.so
+        plugins/imageformats/libplugins_imageformats_qsvg_arm64-v8a.so
+        plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so
+    )
+    set_target_properties(tamic PROPERTIES QT_ANDROID_DEPLOYMENT_DEPENDENCIES "${_tamic_qt_deps}")
 endif()
 
 target_compile_definitions(tamic PRIVATE TAMIC_VERSION_STRING="${TAMIC_VERSION_NAME}")
