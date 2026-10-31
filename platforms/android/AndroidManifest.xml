@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<!--
+  TAMIC для Android. Основа — шаблон Qt 6.11 (android/templates/AndroidManifest.xml).
+  Строки вида "%%INSERT_…%%" заполняет androiddeployqt при сборке.
+  minSdk 28 / targetSdk 36 и ABI (только arm64-v8a) задаются в CMake
+  (src/app/CMakeLists.txt, CMakePresets.json), а не здесь. Имя пакета
+  (ru.tamic.app) — свойство QT_ANDROID_PACKAGE_NAME, атрибут package= не нужен (AGP 9).
+  Распаковка нативных библиотек (ядра libtmc_rt?.so запускаются процессом) — свойство
+  QT_ANDROID_LEGACY_PACKAGING, а не android:extractNativeLibs (AGP 9 его не принимает).
+  Java-помощник и служба расчёта — src/ru/tamic/app/ (TamicBridge, CalcService).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:installLocation="auto"
+    android:versionCode="-- %%INSERT_VERSION_CODE%% --"
+    android:versionName="-- %%INSERT_VERSION_NAME%% --">
+    <!-- %%INSERT_PERMISSIONS -->
+    <!-- %%INSERT_FEATURES -->
+    <!-- Расчёт в фоне (этап П3): служба переднего плана с уведомлением о ходе
+         расчёта, процессор не засыпает при выключенном экране. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Сеть и общая память не нужны: расчёт на телефоне, файлы — через окно выбора папки
+         (SAF) и «Поделиться». Модули Qt добавляют эти разрешения сами — убираем при сборке
+         (анкета «Безопасность данных» Google Play, решение M33). -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+    <application
+        android:name="ru.tamic.app.TamicApplication"
+        android:hardwareAccelerated="true"
+        android:label="TMC Suite"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:enableOnBackInvokedCallback="false"
+        android:allowBackup="true"
+        android:fullBackupOnly="false">
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="TMC Suite"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+
+            <!-- Цикл событий Qt не останавливается, когда приложение уходит в фон
+                 (экран выключен): иначе вывод ядра никто не читает, канал
+                 переполняется и расчёт встаёт (этап П3, ISSUES А-…). -->
+            <meta-data
+                android:name="android.app.background_running"
+                android:value="true" />
+
+            <meta-data
+                android:name="android.app.arguments"
+                android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
+        </activity>
+
+        <!-- Служба расчёта (CalcService.java). Тип specialUse: у dataSync на
+             Android 15+ предел 6 ч в сутки (решение A12). -->
+        <service
+            android:name="ru.tamic.app.CalcService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Long-running electromagnetic field simulation started by the user; progress and Stop button in the notification." />
+        </service>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.qtprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qtprovider_paths"/>
+        </provider>
+    </application>
+</manifest>

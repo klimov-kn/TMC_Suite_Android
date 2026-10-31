@@ -1,0 +1,39 @@
+# ============================================================
+#  TMC Suite for Android - .gitignore
+# ============================================================
+
+# --- Build output ---
+build*/
+android-build/
+.gradle/
+local.properties
+
+# --- Binaries: distributed via GitHub Releases, not committed ---
+/dist/*
+!/dist/README.md
+*.apk
+*.aab
+*.idsig
+*.o
+*.so
+
+# --- Signing keys never go into the repository ---
+*.keystore
+*.jks
+*.pepk
+
+# --- Archives / temporary dumps ---
+*.zip
+*.7z
+*.tar.gz
+
+# --- Editor / OS junk ---
+.idea/
+.vscode/
+.DS_Store
+*.user
+*~
+*.bak
+*.orig
+*.tmp
+*.log

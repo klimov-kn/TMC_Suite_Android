@@ -1,0 +1,48 @@
+name: Вопрос по работе приложения / Question
+description: Не получается задать расчёт, непонятен формат файла или назначение параметра / You cannot set up a calculation or do not understand a file format or a parameter
+labels: ["вопрос"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Возможно, ответ уже есть / The answer may already be here:
+
+        - [Справочник языка `.tpl` / `.tpl` language reference](https://www.tamic.ru/docs/user-manual/tpl-guide.html);
+        - встроенное руководство: «Справка» → «Руководство» / built-in guide: Help → User guide;
+        - [сборка из исходников / building from source](../blob/main/README.md#building).
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: О чём вопрос / Topic
+      options:
+        - Составление файла задания .tpl / Writing a .tpl task
+        - TPL Designer
+        - Запуск расчёта и его параметры / Running a calculation
+        - Просмотр результатов / Viewing results
+        - Поле / Field
+        - Форматы выходных файлов / Output file formats
+        - Сборка из исходников / Building from source
+        - Другое / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Вопрос / Question
+      description: Опишите, что пытаетесь сделать и на чём застряли. / Describe what you are trying to do and where you are stuck.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: Что уже пробовали / What you have tried
+
+  - type: textarea
+    id: tpl
+    attributes:
+      label: Файл задания .tpl / Task file .tpl
+      description: Если вопрос о конкретном задании, вставьте его содержимое. / If the question is about a task, paste it here.
+      render: text

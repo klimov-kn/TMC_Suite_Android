@@ -1,0 +1,107 @@
+name: Сообщить об ошибке / Report a bug
+description: Приложение падает, зависает, считает неверно или ведёт себя не как в руководстве / The app crashes, hangs, calculates wrongly or differs from the guide
+labels: ["дефект"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что нашли время сообщить. Прежде чем заполнять, загляните в
+        [список Issues](../issues?q=is%3Aissue) и в раздел
+        [«Известные ограничения»](../blob/main/README.md#известные-ограничения).
+
+        Thank you for reporting. Before you fill this in, please look through the
+        [issue list](../issues?q=is%3Aissue) and the
+        [known limitations](../blob/main/README.md#known-limitations).
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения / App version
+      description: Указана в разделе «Справка» / Shown on the Help screen
+      placeholder: "0.1.0-alpha4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Откуда установлено / Installed from
+      options:
+        - APK из GitHub Releases / APK from GitHub Releases
+        - Магазин приложений / App store
+        - Сайт www.tamic.ru / Website www.tamic.ru
+        - Собрано из исходников / Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Телефон и версия Android / Phone and Android version
+      placeholder: "Samsung Galaxy S21 FE, Android 16"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где проблема / Where is the problem
+      multiple: true
+      options:
+        - Ядро H (расчёт) / Kernel H (calculation)
+        - Ядро X (расчёт) / Kernel X (calculation)
+        - Расчёт в фоне и уведомление / Background calculation and notification
+        - График S-матрицы / S-matrix chart
+        - Диаграмма направленности / Radiation pattern
+        - Сигналы / Signals
+        - Поле / Field
+        - TPL Designer
+        - Папки, отправка и удаление файлов / Folders, sharing and deleting files
+        - Интерфейс, язык, руководство / Interface, language, user guide
+        - Сборка из исходников / Building from source
+        - Не могу определить / Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Что происходит / What happens
+      description: Если есть сообщение об ошибке, приведите его текст целиком. / If there is an error message, quote it in full.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Чего вы ожидали / What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести / Steps to reproduce
+      description: Пронумерованные шаги от запуска до появления проблемы. / Numbered steps from launch to the problem.
+      placeholder: |
+        1. Открыть пример horn.tpl
+        2. Нажать ...
+        3. Появляется ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tpl
+    attributes:
+      label: Файл задания .tpl / Task file .tpl
+      description: |
+        Вставьте содержимое файла или его сокращённый вариант, на котором проблема ещё
+        воспроизводится. Это самое полезное, что можно приложить.
+        Paste the file, or a shorter version that still shows the problem. Nothing helps more.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Дополнительно / Additional information
+      description: Снимки экрана, журнал ядра, выходные файлы, размер сетки. / Screenshots, kernel log, output files, grid size.

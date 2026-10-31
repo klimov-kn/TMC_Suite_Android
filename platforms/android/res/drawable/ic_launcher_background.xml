@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон адаптивной иконки: bg и сетка ячеек (line). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:pathData="M0,0 H108 V108 H0 Z"
+        android:fillColor="#0a0e16" />
+    <path
+        android:pathData="M6,0 V108 M0,6 H108 M18,0 V108 M0,18 H108 M30,0 V108 M0,30 H108 M42,0 V108 M0,42 H108 M54,0 V108 M0,54 H108 M66,0 V108 M0,66 H108 M78,0 V108 M0,78 H108 M90,0 V108 M0,90 H108 M102,0 V108 M0,102 H108"
+        android:fillColor="#00000000"
+        android:strokeColor="#243049"
+        android:strokeWidth="1"
+        android:strokeLineCap="round" />
+</vector>

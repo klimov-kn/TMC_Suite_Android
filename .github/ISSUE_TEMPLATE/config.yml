@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Справочник языка .tpl / .tpl language reference
+    url: https://www.tamic.ru/docs/user-manual/tpl-guide.html
+    about: Ключевые слова, примитивы, препроцессор, типичные ошибки / Keywords, primitives, preprocessor, common errors
+  - name: Журнал изменений / Changelog
+    url: https://github.com/klimov-kn/TMC_Suite_Android/blob/main/CHANGELOG.md
+    about: Что вошло в выпуск / What is in each release
+  - name: Сообщить об уязвимости / Report a vulnerability
+    url: https://github.com/klimov-kn/TMC_Suite_Android/security/advisories/new
+    about: Приватный канал, сообщение видит только владелец репозитория / Private channel, only the repository owner sees it

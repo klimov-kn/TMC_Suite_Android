@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Передний план: волна accent и тихая волна accent-2. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:pathData="M26.00,54.00 C30.67,62.80 35.33,62.80 40.00,54.00 C44.67,45.20 49.33,45.20 54.00,54.00 C58.67,62.80 63.33,62.80 68.00,54.00 C72.67,45.20 77.33,45.20 82.00,54.00"
+        android:fillColor="#00000000"
+        android:strokeColor="#b07cff"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.7" />
+    <path
+        android:pathData="M26.00,54.00 C30.67,39.33 35.33,39.33 40.00,54.00 C44.67,68.67 49.33,68.67 54.00,54.00 C58.67,39.33 63.33,39.33 68.00,54.00 C72.67,68.67 77.33,68.67 82.00,54.00"
+        android:fillColor="#00000000"
+        android:strokeColor="#34e3c4"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,353 @@
+[
+ {
+  "id": "start",
+  "title": "Getting started",
+  "summary": "What the app does and how it is organised",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "<b>TMC Suite</b> for mobile solves electromagnetic problems right on the phone — with the same H and X calculation kernels as the desktop TMC Suite — and shows the results: the S-matrix, the radiation pattern, port signals and the field step by step. No internet is needed: the calculation runs on the phone itself."
+   },
+   {
+    "type": "p",
+    "text": "A problem is described by a <b>.tpl</b> task file — the same as in the desktop version. You can take a ready one (built-in examples, your own files) or build it in the built-in <b>TPL Designer</b>."
+   },
+   {
+    "type": "h",
+    "text": "Four tabs"
+   },
+   {
+    "type": "list",
+    "items": [
+     "<b>Tasks</b> — folders with tasks, a task, starting and following the calculation.",
+     "<b>TPL Designer</b> — a task builder without typing.",
+     "<b>Results</b> — files of the last calculation: charts, field, Share, delete.",
+     "<b>Help</b> — about the app, interface language, this guide, phone storage."
+    ]
+   },
+   {
+    "type": "note",
+    "text": "The app works in both orientations. Rotating the phone loses nothing: neither the calculation nor the chart zoom."
+   },
+   {
+    "type": "img",
+    "src": "landscape.png",
+    "text": "Landscape: tabs on the left, the chart fills the screen"
+   }
+  ]
+ },
+ {
+  "id": "tasks",
+  "title": "Tasks and folders",
+  "summary": "Where tasks are and where results go",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "The Tasks tab lists folders with tasks. The first one is <b>Examples</b>: built-in tutorial tasks. Your folders are below."
+   },
+   {
+    "type": "list",
+    "items": [
+     "<b>VOLN</b> — waveguide with a dielectric insert, frequency sweep (S-matrix).",
+     "<b>horn</b> — horn in open space (radiation pattern, signals).",
+     "<b>plasma_nby</b> — magnetized plasma in a waveguide (kernel X).",
+     "<b>VFIELD</b>, <b>eps4</b> — field in a waveguide; in the eps = 4 insert the wave is noticeably shorter and slower.",
+     "<b>xr_up</b>, <b>xr_down</b>, <b>xr_off</b> — a horn and an X-shaped array of plasma tubes (kernel X): a switched-on row turns the wave up or down, switched-off tubes let it pass.",
+     "<b>lens1</b>, <b>lens3</b> — Luneburg lens: one feed gives a plane wave, three feeds give three beams."
+    ]
+   },
+   {
+    "type": "img",
+    "src": "folders.png",
+    "text": "Task folders"
+   },
+   {
+    "type": "p",
+    "text": "<b>Choose folder</b> opens the system folder picker. Pick the folder with your .tpl files (for example, copied from a computer) — the app remembers it. Calculation results are written <b>to the same folder</b>, next to the task. Remove only takes the folder off the list; the files stay."
+   },
+   {
+    "type": "img",
+    "src": "tasks.png",
+    "text": "Tasks of the Examples folder"
+   },
+   {
+    "type": "note",
+    "text": "Files included by the task (#include, .h, .sig, .eps) must be in the same folder — the app finds them and takes them into the calculation."
+   }
+  ]
+ },
+ {
+  "id": "run",
+  "title": "Task and calculation",
+  "summary": "Kernel H or X, starting, progress, stopping",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "Tap a task to see its text and the kernel switch. <b>H</b> (tmc_rth) is the regular calculation, <b>X</b> (tmc_rtx) is with plasma (*_STAT_N, _B, _Y blocks). The app suggests the kernel from the task text and remembers your choice for each task."
+   },
+   {
+    "type": "img",
+    "src": "task.png",
+    "text": "The horn.tpl task and the kernel choice"
+   },
+   {
+    "type": "p",
+    "text": "<b>Calculate</b> starts the calculation. The Calculation screen shows percent, step and time step, model and elapsed time, an estimate of the remaining time and the kernel log."
+   },
+   {
+    "type": "img",
+    "src": "run.png",
+    "text": "Calculation in progress"
+   },
+   {
+    "type": "h",
+    "text": "Preparation: percent does not move — this is normal"
+   },
+   {
+    "type": "p",
+    "text": "Before time steps begin, the kernel expands the task (preprocessor), reads the step — topology, ε and plasma on the grid — and prepares the grid. For large tasks this takes noticeable time. Meanwhile the progress bar keeps moving, and the screen says which stage is running and for how long. The percentage starts to grow when time steps begin."
+   },
+   {
+    "type": "list",
+    "items": [
+     "The calculation continues with the screen off and in the background — the notification shade shows the progress and a Stop button.",
+     "Allow notifications when the app asks: without them Android may stop a long calculation.",
+     "Stop interrupts the calculation; files ready by then are still copied to the task folder."
+    ]
+   }
+  ]
+ },
+ {
+  "id": "results",
+  "title": "Results",
+  "summary": "Result files, Share, deleting from the phone",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "The Results tab shows the files of the task's last calculation: <b>.s</b> — S-matrix, <b>.DAT</b> — radiation pattern, <b>.t</b> — port signals, <b>.ex</b>, <b>.ex.frames</b>, <b>.AMP</b>, <b>.FAZ</b>, <b>.tt</b> — field and topology. Tap a file to open its chart or field."
+   },
+   {
+    "type": "img",
+    "src": "results.png",
+    "text": "Results of the horn calculation"
+   },
+   {
+    "type": "p",
+    "text": "<b>Share</b> sends a file (or all files) to e-mail, a messenger or cloud storage — for example, to open them in the desktop TMC Suite."
+   },
+   {
+    "type": "h",
+    "text": "Delete a calculation from the phone"
+   },
+   {
+    "type": "p",
+    "text": "Calculated, looked, no longer need the files — tap <b>Delete</b> at the bottom. The app asks for confirmation and deletes all result files of this calculation. The .tpl task and its input files are never deleted — the task can be calculated again."
+   },
+   {
+    "type": "img",
+    "src": "results_delete.png",
+    "text": "Delete confirmation"
+   },
+   {
+    "type": "p",
+    "text": "To delete a single file: <b>long press</b> the file → Delete → confirm."
+   },
+   {
+    "type": "img",
+    "src": "results_menu.png",
+    "text": "File menu on long press"
+   },
+   {
+    "type": "note",
+    "text": "Working copies of calculations in internal storage are cleared on the Help tab → Phone storage."
+   }
+  ]
+ },
+ {
+  "id": "charts",
+  "title": "Charts",
+  "summary": "S-matrix, pattern, signals; gestures and saving the chart",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "Above the chart is the axis view: for the S-matrix |S|, L (dB), VSWR, phase; for the pattern — linear or dB, Cartesian or polar; for signals — signal, amplitude, L, VSWR. Below the chart are the series: tap to turn a curve on or off."
+   },
+   {
+    "type": "img",
+    "src": "chart_s.png",
+    "text": "S-matrix of the VOLN waveguide over frequency, L in dB"
+   },
+   {
+    "type": "list",
+    "items": [
+     "<b>Pinch</b> — zoom, <b>drag</b> — pan.",
+     "<b>Tap</b> — value of the nearest curve point.",
+     "<b>Double tap</b> or Reset — the initial view.",
+     "<b>Save PNG</b> — an image of the chart with labels, saved to the task folder."
+    ]
+   },
+   {
+    "type": "img",
+    "src": "chart_dn.png",
+    "text": "Radiation pattern in polar coordinates, dB; the maximum is marked"
+   },
+   {
+    "type": "p",
+    "text": "The line under the pattern title shows directivity and radiated power, as in the desktop TMC_DN."
+   },
+   {
+    "type": "img",
+    "src": "chart_t.png",
+    "text": "Port signals over time"
+   }
+  ]
+ },
+ {
+  "id": "compare",
+  "title": "Comparing calculations",
+  "summary": "Several calculated files on one chart",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "Calculated a horn, changed its aperture, calculated again — and want to see what changed. Open the chart and tap <b>+ Compare</b>: a list of files of the same kind from other calculated tasks appears."
+   },
+   {
+    "type": "img",
+    "src": "compare_sheet.png",
+    "text": "Choosing files to compare"
+   },
+   {
+    "type": "p",
+    "text": "Tick one or more files and tap Done. Their curves are drawn on the same chart as <b>dashed lines</b>; in the series list they are labelled with the task name. Tap again in the list to remove a file, Clear removes all."
+   },
+   {
+    "type": "img",
+    "src": "compare.png",
+    "text": "Patterns of two horns: aperture 80 mm and 120 mm (dashed)"
+   },
+   {
+    "type": "note",
+    "text": "You can compare files from different folders and tasks. Save PNG keeps the compared curves with their labels."
+   }
+  ]
+ },
+ {
+  "id": "field",
+  "title": "Field",
+  "summary": "Field relief step by step, topology, plasma layers",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "If the task has <b>FIELDS</b> and <b>TOPOLOGY</b> turned on, the kernel writes the instantaneous field and the topology. During the calculation the app records every time step to a <b>.ex.frames</b> file, so the field can then be played forward and back. Try the <b>VFIELD.TPL</b> example."
+   },
+   {
+    "type": "img",
+    "src": "field.png",
+    "text": "Field in a waveguide with a dielectric insert"
+   },
+   {
+    "type": "list",
+    "items": [
+     "Play/pause, step forward and back, time step slider; speed — a slider from 1 to 30 frames per second.",
+     "One finger — rotate, pinch — zoom, two fingers — pan, double tap — the initial view.",
+     "Layer: field, ε, and for X tasks the plasma N, Y, B.",
+     "View: relief (off — top view), fill, wireframe, topology; 3D geometry — blocks with height or flat; scale per time step or over all time steps.",
+     "Export animation (GIF) — an animated picture saved to the task folder; then Share — to a messenger, e-mail or cloud storage."
+    ]
+   },
+   {
+    "type": "note",
+    "text": "Recorded time steps take space — up to 100 MB per calculation (single-precision frames). If you do not need them, delete the .ex.frames file in Results."
+   }
+  ]
+ },
+ {
+  "id": "designer",
+  "title": "TPL Designer",
+  "summary": "A task without typing: from the domain to the file",
+  "blocks": [
+   {
+    "type": "p",
+    "text": "TPL Designer builds a .tpl task step by step. At the top is the folder where the task will be written (you can change it). Steps are tabs, in any order: <b>Task</b> → <b>Geometry</b> → <b>Objects</b> → <b>Output</b> → <b>Check</b>."
+   },
+   {
+    "type": "img",
+    "src": "designer.png",
+    "text": "Task step: name, kernel, domain, frequencies"
+   },
+   {
+    "type": "p",
+    "text": "<b>Sample</b> opens a library of ready tasks (waveguides, antennas, microstrip, plasma, lab tasks) — a convenient start: open one and change the dimensions. Open reads a ready .tpl from the folder."
+   },
+   {
+    "type": "img",
+    "src": "designer_geom.png",
+    "text": "Geometry step: an inductive iris in a waveguide"
+   },
+   {
+    "type": "list",
+    "items": [
+     "Tools at the bottom: select, rectangle, circle, line, outline, arc, port.",
+     "Draw with your finger: dragging draws, a tap selects, a selected shape can be dragged.",
+     "Two fingers — zoom and pan; snapping to the DELTA grid and to shape points.",
+     "+ By numbers — add a shape with exact dimensions."
+    ]
+   },
+   {
+    "type": "img",
+    "src": "designer_obj.png",
+    "text": "Objects step: shape materials and ports"
+   },
+   {
+    "type": "p",
+    "text": "The Check step shows notes (errors and warnings), the file text and a summary of what will be calculated. <b>Generate</b> writes the task to the folder. After that, Open appears at the bottom — it takes you to the task on the Tasks tab, where you can calculate it right away."
+   },
+   {
+    "type": "img",
+    "src": "designer_check.png",
+    "text": "Check step"
+   }
+  ]
+ },
+ {
+  "id": "help",
+  "title": "Help, language and license",
+  "summary": "Authors and license, interface language, clearing storage",
+  "blocks": [
+   {
+    "type": "img",
+    "src": "about.png",
+    "text": "The Help tab"
+   },
+   {
+    "type": "p",
+    "text": "<b>Interface language</b> — Russian or English. On first launch it follows the phone settings: Russian for a Russian system, English for all others. A choice made here is remembered and always applies, even if the phone language differs."
+   },
+   {
+    "type": "p",
+    "text": "<b>Authors and license.</b> © 2026 K. N. Klimov and the TAMIC group, project website www.tamic.ru. The program is distributed free of charge under the Apache License 2.0; its full text is in Help → Licenses. If calculation results go into a paper, report, thesis or presentation, please cite the authors and the project."
+   },
+   {
+    "type": "p",
+    "text": "<b>Phone storage</b> — working copies of calculations in internal storage (work folders, field files for viewing). Clear frees the space; your tasks and results in task folders are not touched."
+   }
+  ]
+ },
+ {
+  "id": "tips",
+  "title": "Tips",
+  "summary": "How to calculate large tasks on a phone",
+  "blocks": [
+   {
+    "type": "list",
+    "items": [
+     "Calculation time grows roughly as the cube of the grid refinement: start with a coarse step and refine later.",
+     "Dumping fields (FIELDS) at every step slows the calculation a lot — turn it on for the first step only.",
+     "For check runs turn off FIELDS and TOPOLOGY — faster and fewer files.",
+     "Run long calculations on the charger: the phone gets warm and the system may lower the CPU frequency.",
+     "Results match the desktop TMC Suite: send the files with Share and open them on a computer."
+    ]
+   }
+  ]
+ }
+]
