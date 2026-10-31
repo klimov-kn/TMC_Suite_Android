@@ -12,80 +12,34 @@
 **
 */
 
+/// @file wrrd_s.cpp
+/// @brief Имя S-файла по заданию и шагу (`make_S_matrix_name`), копирование S-файла (`copy_S_matrix`).
+///
+/// Часть модуля «Библиотека sfile95». Наследие TAMIC: обе функции в программах
+/// этой версии не вызываются, а нужные им функции задания (`get_tpl_file_name`,
+/// `get_tpl_step`, `change_file_extension`, `copy_file`) в сборке не определены.
+/// Объявлены и описаны в `s_file.h`.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#legacy
+
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
 
-#include <Typedef.h>
-#include <TMCLIMIT.H>
-#include <TMCGRAPH.H>
-#include <RUN_FLAG.H>
-#include <TMC_LIB.H>
-#include <INDANDEC.H>
-#include <COMPFILE.H>
-#include <FRQDATA.H>
-#include <Postpro.h>
-#include <TPL_FILE.H>
-#include <DATACNST.H>
-
-  #include "_FILE.H"
+#include <typedef.h>
+#include <tmclimit.h>
+#include <tmcgraph.h>
+#include <tmc_lib.h>
+#include <frqdata.h>
+#include <postpro.h>
 
 
 
+
+/// Имя последнего S-файла, построенного `make_S_matrix_name`.
 char S_filename[FILENAME_MAX];
-static char S_filename_buff[FILENAME_MAX];
-static int file_counter = 0;
-
-
-void make_S_matrix_name( char *S_name, S_INDEX *si )
- {
-  char *llist_filename = get_tpl_file_name();
-  char *ptr, buff[80];
-
-                                /* store file name for control*/
-  if( get_current_frq_num() == 0 )
-   {
-   if( file_counter == 0 )
-    {
-     strcpy( S_filename_buff, llist_filename );
-     file_counter++;
-     }
-    else
-     {
-      if( strcmp( S_filename_buff, llist_filename ) == 0 ) file_counter = (file_counter+1)%10;
-       else                      /* new name of tpl file*/
-        {
-         file_counter = 1;
-         strcpy( S_filename_buff, llist_filename );
-/*         S_filename_buff[0] = 0;*/
-         }
-      }
-   }
-                                                  /* make S_matrix file name */
-  sprintf( buff, "S%d%d", file_counter, get_tpl_step() );
-  if( (ptr = strchr( buff, ' ' )) != NULL ) *ptr = '0';
-  change_file_extension( S_filename, llist_filename, buff );
-
-  strcpy( si->tpl_name, llist_filename );
-  strcpy( S_name, S_filename );
-
-
-  }
 
 
 
 
-int copy_S_matrix( void )
- {
-  char buff[FILENAME_MAX], tag_name[FILENAME_MAX], *ptr;
 
-  if( get_comp_file_flag() == 0 ) return( 0 );
 
-  strcpy( buff, get_comp_file_name() );
-  strcpy( tag_name, ( ((ptr = strrchr( buff, '\\')) != NULL)? (ptr + 1):buff) );
-
-  if( (ptr = strrchr( tag_name, '.')) == NULL ) *(ptr = strrchr( tag_name, '\0')) = '.';
-  *++ptr = '\0';
-
-  return( copy_file( S_filename, strcat( tag_name, "S" ) ) );
-  }

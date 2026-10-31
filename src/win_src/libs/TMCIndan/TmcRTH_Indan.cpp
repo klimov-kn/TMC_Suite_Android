@@ -1,16 +1,26 @@
 // TmcRTH_Indan.cpp : implementation file
 //
 
-#include "STDAFX.H"
-#include <TmcRTH_Indan.h>
-#include <Prepr1.h>
-#include <TmcRTH_Indan.h>
+/// @file tmcrth_indan.cpp
+/// @brief Чтение задания: запуск препроцессора, построчное чтение временного файла,
+///        поиск шага #STEP и секций, проверки окна и частоты `SMATRIX`.
+///
+/// Часть библиотеки TMCIndan. Реализует `CTmcRTH_Indan` и `MainPrepr`.
+/// Каждая секция ищется заново от начала временного файла препроцессора:
+/// `FindStep` открывает файл и встаёт на нужный `#STEP`, `FindSection` — на метку
+/// секции, `GetLineSection` отдаёт строки до метки конца секции.
+/// @see https://www.tamic.ru/docs/code/lib-tmcindan.html#reading
 
-//#ifdef _DEBUG
-//#define new DEBUG_NEW
-//#undef THIS_FILE
-//static char THIS_FILE[] = __FILE__;
-//#endif
+#include <tmcrth_indan.h>
+#include <prepr1.h>
+#include <map>		// T-8
+#include <set>
+#include <string>
+#ifndef _WIN32
+#include <unistd.h>	// S-16: getpid
+#endif
+#include <tmcrth_indan.h>
+
 
 /////////////////////////////////////////////////////////////////////////////
 // CTmcRTH_Indan
@@ -19,9 +29,7 @@ CTmcRTH_Indan::CTmcRTH_Indan()
 {
 	cError.Clear();
 	nStep = 0;
-	pszPrepr = NULL;
-	nPreprPos = 0;
-	bPreprOpen = FALSE;
+	pfPrepr = NULL;
 	csTplFileName.Format("");
 	csTplFileNamePrepr.Format("");
 	csCurrentPath.Format("");
@@ -45,8 +53,7 @@ void CTmcRTH_Indan::DeleteData( void )
 	cParam.DeleteData();
 	nStep = 0;
 	cError.Clear();
-	if( pszPrepr != NULL ) free( pszPrepr );
-	pszPrepr = NULL;
+	if( csTplFileNamePrepr.GetLength() != 0 ) remove(csTplFileNamePrepr);
 	csTplFileName.Format("");
 	csTplFileNamePrepr.Format("");
 	csCurrentPath.Format("");
@@ -60,14 +67,8 @@ void CTmcRTH_Indan::SetTplFileName( CString csFileName )
 	CString csBuf;
 
 //		{	CString csBuf1;
-//			csBuf1.Format("Trace function\nSetTplFileName(%s);", csFileName);
-//			AfxMessageBox(csBuf1);		
-//		};
 	DeleteData();
 //		{	CString csBuf1;
-//			csBuf1.Format("Trace function\nSetTplFileName(%s);", csFileName);
-//			AfxMessageBox(csBuf1);		
-//		};
 
 	if( ( pfTpl = fopen( csFileName, "r") ) == NULL )
 	{
@@ -76,20 +77,15 @@ void CTmcRTH_Indan::SetTplFileName( CString csFileName )
 		return;
 	};
 	fclose(pfTpl);
+	// Файл открывается: запоминаем путь, папку задания и имя временного файла препроцессора.
 	csTplFileName = csFileName;
 	SetCurrentPath();
-	csTplFileNamePrepr.Format("%s%s", csTplFileName, CTMCRTH_INDANPREPRFNA);
+	// S-16: the number of the process in the name - two runs of one .tpl do not share the file
+	csTplFileNamePrepr.Format("%s%s%lu", (LPCSTR)csTplFileName, CTMCRTH_INDANPREPRFNA, (unsigned long)getpid());
 	MakePreprFile();
 	return;
 }
 
-void CTmcRTH_Indan::SetTplFileName( char *pszFileName )
-{
-	CString csBuffer;
-	csBuffer.Format("%s", pszFileName);
-	SetTplFileName( csBuffer );
-	return;
-}
 
 void CTmcRTH_Indan::SetCurrentPath( void )
 {
@@ -106,16 +102,18 @@ void CTmcRTH_Indan::SetCurrentPath( void )
 		return;
 	};
 
-	strcpy( szBuf, csTplFileName );
+	// Полный путь к заданию; папка — всё до последнего разделителя пути.
+	DWORD dwFull = GetFullPathNameA( csTplFileName, CTMCRTH_INDANSBUF, szBuf, NULL );	// A-16
+	if( ( dwFull == 0 )||( dwFull >= CTMCRTH_INDANSBUF ) ) strcpy( szBuf, csTplFileName );
 	n = (int)(strlen(szBuf));
-	if( n < 1 ) 
+	if( n < 1 )
 	{
 		csCurrentPath.Format( "" );
 		return;
 	};
 	for( i = n - 1; i > 1; i--)
 	{
-		if( szBuf[i] == '\\')
+		if( TMC_IS_SEP(szBuf[i]))
 		{
 			szBuf[i] = '\0';
 			csCurrentPath.Format( "%s", szBuf );
@@ -141,12 +139,12 @@ void CTmcRTH_Indan::MakePreprFile( void )
 {
 	if( IsError() ) return;
 
-//	WriteFileForMaple( "test_maple.dat", "test_maple_spline.dat", 130., 5.0, 40.0, 360.0, 398.0, 86.5);
 
 	PutTrace("Load prepr.");
-	MainPrepr( &pszPrepr, csTplFileName, csCurrentPath, cError );
-	SavePreprFile();
+//		CString csBuf1;
+	MainPrepr( csTplFileNamePrepr, csTplFileName, csCurrentPath, cError );
 	PutTrace("UnLoad prepr.");
+//		CString csBuf1;
 	return;
 }
 
@@ -160,14 +158,6 @@ int CTmcRTH_Indan::GetNStepMax( CString csFileName )
 	return i;
 }
 
-int CTmcRTH_Indan::GetNStepMax( void )
-{
-	int i;
-	OpenPreprFile();
-	i = CalcNStepMax();
-	ClosePreprFile();
-	return i;
-}
 
 int CTmcRTH_Indan::CalcNStepMax( void )
 {
@@ -177,9 +167,45 @@ int CTmcRTH_Indan::CalcNStepMax( void )
 	CString csCh;
 	CString csBuf;
 
+	// T-8: an .s file holds at most FREQ_MAX_NUM-1 = 99 frequencies; count them before the run
+	std::map< std::string, std::set<std::string> > mSFreq;
+	BOOL bInOutput = FALSE;
+
+	// Один проход по файлу: i — число закрытых шагов, ii — 1 внутри #STEP ... #END_STEP.
+	// Попутно внутри #OUTPUT собираются пары «файл SMATRIX -> множество частот»
+	// (частота нормализуется через %.12g, к имени без точки дописывается .s).
 	for( i = 0, ii = 0; GetLine( csCh ) != EOF;  )
 	{
 		if( IsError() ) return 0;
+		if( strncmp( csCh, CTMCRTH_INDANMET_ENDOUTPUT, strlen(CTMCRTH_INDANMET_ENDOUTPUT) ) == 0 ) bInOutput = FALSE;
+		else if( strncmp( csCh, CTMCRTH_INDANMET_OUTPUT, strlen(CTMCRTH_INDANMET_OUTPUT) ) == 0 ) bInOutput = TRUE;
+		else if( bInOutput && ( strncmp( csCh, CTMCRTH_SMATRIXOUT_ID, strlen(CTMCRTH_SMATRIXOUT_ID) ) == 0 ) )
+		{
+			std::string sTok[2];
+			const char *p = (const char *)csCh + strlen(CTMCRTH_SMATRIXOUT_ID);
+			int nTok = 0, nDepth = 0;
+			for( ; ( *p != '\0' )&&( nTok < 2 ); p++ )
+			{
+				if( ( *p == '(' )||( *p == '[' )||( *p == '{' ) ) nDepth++;
+				if( ( *p == ')' )||( *p == ']' )||( *p == '}' ) ) nDepth--;
+				if( ( *p == ';' )&&( nDepth == 0 ) ) { nTok++; continue; };
+				if( ( *p == ' ' )||( *p == '\t' )||( *p == '\n' )||( *p == '\r' ) ) continue;
+				sTok[nTok] += *p;
+			};
+			if( nTok == 2 )
+			{
+				char *pEnd;
+				double dF = strtod( sTok[1].c_str(), &pEnd );
+				if( ( pEnd != sTok[1].c_str() )&&( *pEnd == '\0' ) )
+				{
+					char szF[64];
+					sprintf( szF, "%.12g", dF );
+					sTok[1] = szF;
+				};
+				if( sTok[0].find( '.' ) == std::string::npos ) sTok[0] += ".s";
+				mSFreq[ sTok[0] ].insert( sTok[1] );
+			};
+		};
 		if( strncmp( csCh, CTMCRTH_INDANMET_STEP, strlen(CTMCRTH_INDANMET_STEP) ) == 0 )
 		{
 			switch( ii )
@@ -208,6 +234,7 @@ int CTmcRTH_Indan::CalcNStepMax( void )
 			};
 		};
 	};
+	if( IsError() ) return 0;	// N-18: the error of GetLine is not replaced by "Missing #END_STEP"
 
 	if( ii != 0 )
 	{
@@ -216,13 +243,25 @@ int CTmcRTH_Indan::CalcNStepMax( void )
 		return 0;
 	};
 
+	{	// T-8
+		std::map< std::string, std::set<std::string> >::iterator it;
+		for( it = mSFreq.begin(); it != mSFreq.end(); it++ )
+		{
+			if( (int)it->second.size() < 100 ) continue;
+			csBuf.Format("%s %s: %d different frequencies in the task, at most 99 fit in one S-matrix file - split the sweep into several %s files",
+				CTMCRTH_SMATRIXOUT_ID, it->first.c_str(), (int)it->second.size(), CTMCRTH_SMATRIXOUT_ID );
+			cError.PutErrorMessage( csBuf );
+			return 0;
+		};
+	};
+
 	return i;
 }
 
 void CTmcRTH_Indan::OpenPreprFile( void )
 {
 	if( IsError() ) return;
-	if( bPreprOpen ) return;
+	if( pfPrepr != NULL ) return;
 
 	PutTrace("Load prepr.");
 
@@ -235,46 +274,71 @@ void CTmcRTH_Indan::OpenPreprFile( void )
 		return;
 	};
 
-	if( pszPrepr == NULL )
+	if( ( pfPrepr = fopen( csTplFileNamePrepr, "r") ) == NULL )
 	{
 		csBuf.Format("Can't open prepr file %s", csTplFileNamePrepr);
 		cError.PutErrorMessage( csBuf );
 		return;
 	};
-	nPreprPos = 0;
-	bPreprOpen = TRUE;
 	return;
 }
 
 void CTmcRTH_Indan::ClosePreprFile( void )
 {
-	bPreprOpen = FALSE;
-	nPreprPos = 0;
+	if( pfPrepr != NULL ) fclose( pfPrepr );
+	pfPrepr = NULL;
 	PutTrace("UnLoad prepr.");
 	return;
 }
 
 int CTmcRTH_Indan::GetLine( CString &csCh )
 {
-	if( !bPreprOpen ) OpenPreprFile();
+	if( pfPrepr == NULL ) OpenPreprFile();
 	if( IsError() ) return EOF;
 
+	// Читаем строки, пока не найдётся значимая: пустые строки и комментарии «!»
+	// пропускаются; строка, не поместившаяся в буфер, — ошибка (кроме комментария).
 	char szBuf[CTMCRTH_INDAN_LINELEN];
 	CString csBuf;
 
-	if( PreprGets( szBuf, CTMCRTH_INDAN_LINELEN ) == NULL )
+	for( ;; )	// A-2: cikl vmesto rekursii - pustye stroki i kommentarii propuskayutsya
+	{
+	if( fgets( szBuf, CTMCRTH_INDAN_LINELEN, pfPrepr ) == NULL )
 	{
 		csBuf.Format("Missing %s", CTMCRTH_INDANMET_EOF);
 		cError.PutErrorMessage( csBuf );
 		ClosePreprFile();
 		return EOF;
 	};
-	
+	{	// N-18: a longer line is not cut silently
+		size_t nLen = strlen( szBuf );
+		if( ( nLen == CTMCRTH_INDAN_LINELEN - 1 )&&( szBuf[nLen-1] != '\n' )&&( !feof( pfPrepr ) ) )
+		{
+			const char *pFirst = szBuf;
+			while( ( *pFirst == ' ' )||( *pFirst == '\t' ) ) pFirst++;
+			if( *pFirst == '!' )	// a long comment is skipped as a whole
+			{
+				int c;
+				while( ( ( c = fgetc( pfPrepr ) ) != EOF )&&( c != '\n' ) ) ;
+				szBuf[0] = '\0';
+			}
+			else
+			{
+				szBuf[60] = '\0';
+				csBuf.Format("A line of the task is longer than %d characters: {%s...}", CTMCRTH_INDAN_LINELEN - 2, szBuf);
+				cError.PutErrorMessage( csBuf );
+				ClosePreprFile();
+				return EOF;
+			};
+		};
+	};
+
 	del_blanks( szBuf );
-	
+
 	if( (szBuf[0] == '!')||(szBuf[0] == '\n') ) szBuf[0] = '\0';
-	
-	if( strlen( szBuf ) == 0 ) return GetLine( csCh );
+
+	if( strlen( szBuf ) != 0 ) break;
+	}
 
 	csCh.Format("%s", szBuf);
 
@@ -286,54 +350,16 @@ int CTmcRTH_Indan::GetLine( CString &csCh )
 	return 0;
 }
 
-// M15: the expanded task is kept in memory
-// (pszPrepr) instead of the temporary file <task>~$Prepr$~. This is fgets()
-// over that buffer: the same characters, line by line, as fgets() over the
-// former file written and read back in text mode.
-char * CTmcRTH_Indan::PreprGets( char *szBuf, int n )
-{
-	if( pszPrepr == NULL || n <= 0 || pszPrepr[nPreprPos] == '\0' ) return NULL;
-	const char *p = pszPrepr + nPreprPos;
-	size_t i = 0;
-	while( i + 1 < (size_t)n && p[i] != '\0' )
-	{
-		szBuf[i] = p[i];
-		i++;
-		if( p[i - 1] == '\n' ) break;
-	};
-	szBuf[i] = '\0';
-	nPreprPos += i;
-	return szBuf;
-}
-
-static BOOL bSavePreprFileFlag = FALSE;
-
-void SetPreprSaveFile( BOOL bSave )
-{
-	bSavePreprFileFlag = bSave;
-	return;
-}
-
-// Debugging only, on explicit request (kernel key /SavePrepr): write the
-// expanded task to <task>~$Prepr$~ exactly as the former temporary file
-// (text mode); the file is not deleted afterwards.
-void CTmcRTH_Indan::SavePreprFile( void )
-{
-	FILE *pf;
-	if( !bSavePreprFileFlag || pszPrepr == NULL ) return;
-	if( ( pf = fopen( csTplFileNamePrepr, "w" ) ) == NULL ) return;
-	fputs( pszPrepr, pf );
-	fclose( pf );
-	return;
-}
-
 void CTmcRTH_Indan::del_blanks( char * szBuf )
 {
 	int i, n;
 	int ii, i1;
-	
+	int nGap = 0;	// N-17
+
 	n = (int)(strlen( szBuf ));
-	
+
+	// i1 — позиция записи; ii = 1 — предыдущий символ значимый (промежуток ещё не записан).
+	// nGap — число записанных промежутков: первый всегда становится пробелом.
 	for( i = 0, i1 = 0, ii = 0; i < n; i++)
 	{
 		switch( szBuf[i] )
@@ -343,7 +369,8 @@ void CTmcRTH_Indan::del_blanks( char * szBuf )
 			if( ii == 0) break;
 			if( ii == 1 )
 			{
-			szBuf[ i1 ] = szBuf[ i ];
+			szBuf[ i1 ] = ( nGap == 0 ) ? ' ' : szBuf[ i ];	// N-17: a tab after the keyword is a blank
+			nGap++;
 			i1++;
 			ii = 0;
 			};
@@ -387,6 +414,7 @@ void CTmcRTH_Indan::ReadParamSection( int nStep1 )
 	CString csBuf;
 
 	if( IsError() ) return;
+	// Параметры накапливаются: сбрасываются только перед первым шагом.
 	if( nStep1 == 1 ) cParam.DeleteData();
 	
 	FindStep( nStep1 );
@@ -401,13 +429,20 @@ void CTmcRTH_Indan::ReadParamSection( int nStep1 )
 		}
 		else
 		{
+			// B-15 (author 29.10): every step is an independent task - a step without #PARAM is an error
+			// (old: the step silently repeated the parameters of the previous step).
+			csBuf.Format("Missing section %s in %d step. Every step is an independent task: write X_MIN, X_MAX, Y_MIN, "
+				"Y_MAX, DELTA, TIME, FREQ in the section %s of every step", CTMCRTH_INDANMET_PARAM, nStep1,
+				CTMCRTH_INDANMET_PARAM);
+			cError.PutErrorMessage(csBuf);
 			ClosePreprFile();
 			return;
 		};
 	};
+	cParam.BeginSection();	// A-13, B-15: which parameters this step writes
 	for( ; GetLineSection( csCh ) != EOF;  )
 	{
-		if( IsError() ) 
+		if( IsError() )
 		{
 			ClosePreprFile();
 			return;
@@ -530,7 +565,7 @@ int CTmcRTH_Indan::GetBlock( CString &csCh )
 	if( strncmp( csBuf, CTMCRTH_INDANMET_BLOCK, strlen(CTMCRTH_INDANMET_BLOCK) ) != 0 ) 
 	{
 		csBuf1.Format("{%s} must {%s} in %s section",
-								(LPCTSTR)csBuf,
+								csBuf,
 								CTMCRTH_INDANMET_BLOCK,
 								CTMCRTH_INDANMET_TOPOLOGY );
 		cError.PutErrorMessage( csBuf1 );
@@ -541,9 +576,9 @@ int CTmcRTH_Indan::GetBlock( CString &csCh )
 	csCh += csBuf;
 	while( (i = GetLineSection( csBuf )) != EOF )
 	{
+//			FILE *fp;
 		if( strncmp( csBuf, CTMCRTH_INDANMET_ENDBLOCK, strlen(CTMCRTH_INDANMET_ENDBLOCK) ) == 0 ) 
 		{
-//			csCh += csBuf;
 			return 0;
 		};
 		if( strncmp( csBuf, CTMCRTH_INDANMET_BLOCK, strlen(CTMCRTH_INDANMET_BLOCK) ) == 0 ) 
@@ -569,6 +604,7 @@ void CTmcRTH_Indan::ReadOutputSection( void )
 
 	if( IsError() ) return;
 	
+	// Значения секции #OUTPUT переводятся в СИ единицами, прочитанными в #PARM.
 	cOut.DeleteData();
 
 	cOut.SetFreqAndTimeUnit( cParam.rFreqUnit, cParam.rTimeUnit );
@@ -593,6 +629,43 @@ void CTmcRTH_Indan::ReadOutputSection( void )
 	
 	cOut.IsCorrectly( cError );
 	cOut.AddPath( csCurrentPath );
+
+	// B-3.2: with one frequency S is calculated at FREQ (TtoS reads it from the .t), the frequency of SMATRIX
+	// is only written into the .s - they must be equal. A port fed from a signal file ([name]) is the
+	// multi-frequency run (wideband post-processing), not checked.
+	if( ( !cError.IsError() )&&( cOut.bOutSMatrix ) )
+	{
+		BOOL bWide = FALSE;
+		CTmcRTH_BlockList *pcBl;
+		for( pcBl = cTopology.GetBlockList(); pcBl != NULL; pcBl = pcBl->GetNext() )
+		{
+			CString csV = pcBl->GetcsVx();
+			if( ( csV.GetLength() > 0 )&&( ((LPCSTR)csV)[0] == '[' ) ) bWide = TRUE;
+		};
+		if( cOut.dTmax < 0.0 )	// B-22: SMATRIX without Tmin; Tmax
+		{
+			if( bWide )
+			{
+				cOut.dTmin = 0.0;			// the full window of the multi-frequency run
+				cOut.dTmax = cParam.rTmax;
+			}
+			else
+			{
+				csBuf.Format("%s: with one frequency the window is required - %s name; %lg; Tmin; Tmax; with Tmin in the steady state",
+					CTMCRTH_SMATRIXOUT_ID, CTMCRTH_SMATRIXOUT_ID, cOut.dFreq/cParam.rFreqUnit );
+				cError.PutErrorMessage(csBuf);
+			};
+		};
+		if( ( !cError.IsError() )&&( !bWide )&&( fabs( cOut.dFreq - cParam.rFreq ) > 1e-9*fabs( cParam.rFreq ) ) )
+		{
+			csBuf.Format("%s: the frequency %lg %s differs from FREQ %lg %s of step %d. With one frequency the S-matrix"
+				" is calculated at FREQ - set the frequency in %s equal to FREQ (%s name; %lg; Tmin; Tmax;)",
+				CTMCRTH_SMATRIXOUT_ID, cOut.dFreq/cParam.rFreqUnit, (LPCSTR)cParam.csFreqUnit,
+				cParam.rFreq/cParam.rFreqUnit, (LPCSTR)cParam.csFreqUnit, nStep,
+				CTMCRTH_SMATRIXOUT_ID, CTMCRTH_SMATRIXOUT_ID, cParam.rFreq/cParam.rFreqUnit );
+			cError.PutErrorMessage(csBuf);
+		};
+	};
 	
 	ClosePreprFile();
 	return;
@@ -636,6 +709,7 @@ void CTmcRTH_Indan::ReadTopologySection( void )
 	CString csBuf;
 
 	if( IsError() ) return;
+	// Список блоков строится заново для каждого шага.
 	cTopology.DeleteData();
 	
 	cTopology.SetParam( &cParam );
@@ -723,29 +797,9 @@ int CTmcRTH_Indan::GetnBlock( void )
 	return cTopology.GetBlockNumber();
 }
 
-void CTmcRTH_Indan::OnOffFieldOutput()
-{
-	cOut.OnOffFieldOutput();
-	return;
-}
 
-void CTmcRTH_Indan::OnOffFieldOutput1()
-{
-	cOut.OnOffFieldOutput1();
-	return;
-}
 
-void CTmcRTH_Indan::OnOffFieldOutputU()
-{
-	cOut.OnOffFieldOutputU();
-	return;
-}
 
-void CTmcRTH_Indan::OnOffSinchronizationFieldOutput()
-{
-	cOut.OnOffSinchronizationFieldOutput();
-	return;
-}
 
 void CTmcRTH_Indan::GetnXnY(int &nX11, int &nY11)
 {
@@ -759,47 +813,9 @@ CString CTmcRTH_Indan::GetCurrentPath()
 	return csCurrentPath;
 }
 
-void CTmcRTH_Indan::OnOffSoundEffects()
-{
-	cOut.OnOffSoundEffects();
-	return;
-}
-
-void CTmcRTH_Indan::ReadData(CString csFileName, int nStepNum )
-{
-	if( strlen( csFileName ) < 1 )
-	{
-		CString csBuf;
-		csBuf.Format("bad file name (lenght of file name < 1)");
-		cError.PutErrorMessage( csBuf );
-		return;
-	}
-	SetTplFileName( csFileName );
-	if( cError.IsError() )
-	{
-		return;
-	}
-	if( (nStepNum < 1)||(nStepNum > GetNStepMax() ) )
-	{
-		CString csBuf;
-		csBuf.Format("bad step number %d (in file %s step number must be from 1 to %d) ", nStepNum, csFileName, GetNStepMax());
-		cError.PutErrorMessage( csBuf );
-		return;
-	};
-	SetStepNumber( nStepNum );
-	ReadParamSection();
-	ReadTopologySection();
-	ReadLinkListSection();
-	ReadOutputSection();
-
-	return;
-}
 
 
-CString CTmcRTH_Indan::GetTopologyFileName(void)
-{
-	return csTplFileName;
-}
+
 
 // Write file csFileName for calculating in Maple 9.0
 // after executing Maple 9.0 data was write in file csFileNameData
@@ -810,60 +826,12 @@ CString CTmcRTH_Indan::GetTopologyFileName(void)
 // dStatorR2 - external radius of stator in mm
 // dMagnMomP -  magnetic moment
 
-CTmcLibError CTmcRTH_Indan::WriteFileForMaple(CString csFileName, CString csFileNameData, double dHeight, double dRolikR1, double dRolikR2, double dStatorR1, double dStatorR2, double dMagnMomP)
-{
-	CTmcLibError cError1;
-	FILE *fp;
-
-	if( strlen(csFileName) < 1 )
-	{
-		cError1.PutErrorMessage("lenght of file name for Maple < 1");
-		return cError1;
-	}
-
-	if( strlen(csFileNameData) < 1 )
-	{
-		cError1.PutErrorMessage("lenght of file name for spline data < 1");
-		return cError1;
-	}
-	
-	if( ( fp = fopen( csFileName , "w") ) == NULL )
-	{
-		CString csBuf;
-		csBuf.Format("can't open file {%s} for write geometry data for Maple", csFileName );
-		cError1.PutErrorMessage( csBuf );
-		return cError1;
-	};
-
-	if( fprintf( fp, "\nFile name for spline \"%s\"\nHeight stator and rolik %lg mm\nInternal radius of rolik %lg mm\nExternal radius of rolik %lg mm\nInternal radius of stator %lg mm\nInternal radius of stator %lg mm\nMagnetic moment %lg \n",
-		(LPCTSTR)csFileNameData, dHeight, dRolikR1, dRolikR2, dStatorR1, dStatorR2, dMagnMomP ) < 1 )
-	{
-		CString csBuf;
-		csBuf.Format("can't  write geometry data for Maple in file {%s}", csFileName );
-		cError1.PutErrorMessage( csBuf );
-		fclose( fp );
-		return cError1;
-	};
-
-
-	fclose( fp );
-	return cError1;
-}
-
-CTmcLibError CTmcRTH_Indan::WriteFileForMaple(char *szFileName, char *szFileNameData, double dHeight, double dRolikR1, double dRolikR2, double dStatorR1, double dStatorR2, double dMagnMomP)
-{
-	CString csBuf, csBuf1;
-
-	csBuf.Format("%s", szFileName);
-	csBuf1.Format("%s", szFileNameData);
-
-	return WriteFileForMaple( csBuf, csBuf1, dHeight, dRolikR1, dRolikR2, dStatorR1, dStatorR2, dMagnMomP);
-}
 
 
 
 
-void MainPrepr( char **ppszPrepr,	CString csTplFileName, CString csCurrentPath, CTmcLibError &cError )
+
+void MainPrepr( CString csTplFileNamePrepr,	CString csTplFileName, CString csCurrentPath, CTmcLibError &cError )
 {
 	if( cError.IsError() ) return;
 
@@ -883,12 +851,26 @@ void MainPrepr( char **ppszPrepr,	CString csTplFileName, CString csCurrentPath, 
 
 //	char *ch;
 	char szSourceFileName[512];
+	char szTargetFileName[512];
+
+	// J-1: the paths must fit the buffers (old: strcpy without a check wrote past the 512 bytes on the stack)
+	if( ( strlen( csTplFileName ) >= sizeof(szSourceFileName) )||( strlen( csTplFileNamePrepr ) >= sizeof(szTargetFileName) )||
+		( strlen( csCurrentPath ) >= BUF_STR_N_MAX ) )
+	{
+		delete []szPathName;
+		delete []szError;
+		cError.PutErrorMessage("The path of the task is too long for the preprocessor (more than 511 characters): "
+			"move the task to a shorter folder");
+		return;
+	};
 	
+	// Препроцессор принимает строки C; буферы имён — 512 символов.
 	strcpy( szSourceFileName, csTplFileName);
+	strcpy( szTargetFileName, csTplFileNamePrepr);
 	strcpy( szPathName, csCurrentPath);
 
 
-	MainPreprMem( ppszPrepr, szSourceFileName, szPathName, szError );
+	MainPrepr1( szTargetFileName,	szSourceFileName, szPathName, szError );
 
 	if( strlen(szError) != 0 ) cError.PutErrorMessage(szError);
 	

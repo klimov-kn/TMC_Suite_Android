@@ -1,3 +1,8 @@
+/// @file meshslice.cpp
+/// @brief Реализация среза сетки: отрезки по рёбрам, сшивка в цепочки, вложенность, Дуглас — Пейкер.
+///
+/// Описание — в meshslice.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#mesh-import
 #include "meshslice.h"
 
 #include <QHash>
@@ -40,6 +45,10 @@ QString normalAxisName(SlicePlane p)
 
 namespace {
 
+/// @brief Составляет ключ ребра по номерам вершин (порядок вершин не важен).
+/// @param[in] a  номер первой вершины.
+/// @param[in] b  номер второй вершины.
+/// @return 64-битный ключ (меньший номер — в старших 32 битах).
 quint64 edgeKey(int a, int b)
 {
     if (a > b)
@@ -50,6 +59,9 @@ quint64 edgeKey(int a, int b)
 /// Отрезки одного тела -> цепочки. Узел цепочки — ребро сетки, которое пересекла
 /// плоскость; у ребра замкнутой поверхности ровно два треугольника, поэтому у узла
 /// ровно два соседа, и цепочки обходятся без единого сравнения расстояний.
+/// @param[in] segs   отрезки среза: пары ключей рёбер.
+/// @param[in] where  точка пересечения плоскости с каждым ребром, мм в координатах (u, v).
+/// @return Контуры: сначала открытые (от концов), затем замкнутые.
 QVector<SliceLoop> chain(const QVector<std::array<quint64, 2>> &segs,
                          const QHash<quint64, QPointF> &where)
 {
@@ -101,6 +113,9 @@ QVector<SliceLoop> chain(const QVector<std::array<quint64, 2>> &segs,
     return out;
 }
 
+/// @brief Вычисляет знаковую площадь многоугольника (формула Гаусса).
+/// @param[in] p  вершины.
+/// @return Площадь, мм^2; знак — направление обхода.
 double polygonArea(const QVector<QPointF> &p)
 {
     double a = 0.0;
@@ -111,6 +126,11 @@ double polygonArea(const QVector<QPointF> &p)
     return a / 2.0;
 }
 
+/// @brief Вычисляет расстояние от точки до отрезка.
+/// @param[in] p  точка.
+/// @param[in] a  начало отрезка.
+/// @param[in] b  конец отрезка.
+/// @return Расстояние, мм.
 double distToSegment(const QPointF &p, const QPointF &a, const QPointF &b)
 {
     const double dx = b.x() - a.x(), dy = b.y() - a.y();
@@ -121,6 +141,12 @@ double distToSegment(const QPointF &p, const QPointF &a, const QPointF &b)
     return std::sqrt(ex * ex + ey * ey);
 }
 
+/// @brief Рекурсивно отмечает точки, которые нужно сохранить (алгоритм Дугласа — Пейкера).
+/// @param[in]     p    точки ломаной.
+/// @param[in]     i0   номер начальной опорной точки.
+/// @param[in]     i1   номер конечной опорной точки.
+/// @param[in]     tol  допуск отклонения, мм.
+/// @param[in,out] keep флаги сохранения точек.
 void douglasPeucker(const QVector<QPointF> &p, int i0, int i1, double tol, QVector<bool> *keep)
 {
     if (i1 <= i0 + 1)

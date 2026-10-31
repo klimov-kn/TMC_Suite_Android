@@ -1,18 +1,19 @@
 // TmcRTH_IndanTopology.cpp : implementation file
 //
 
-#include "STDAFX.H"
-#include <Tmcgrviw.h>
-#include <TmcRTH_IndanTopology.h>
-#include <TmcRTH_Indan.h>
-#include <math.h>
-#include <EXPR.H>
+/// @file tmcrth_indantopology.cpp
+/// @brief Топология шага: передача блоков в список и разбор строк размещения `T n; X0; Y0;`.
+///
+/// Часть библиотеки TMCIndan. Реализует `CTmcRTH_IndanTopology`; здесь же
+/// определяется сторона входа (левая/правая, нижняя/верхняя) по точке привязки.
+/// @see https://www.tamic.ru/docs/code/lib-tmcindan.html#topology
 
-//#ifdef _DEBUG
-//#define new DEBUG_NEW
-//#undef THIS_FILE
-//static char THIS_FILE[] = __FILE__;
-//#endif
+#include <tmcgrviw.h>
+#include <tmcrth_indantopology.h>
+#include <tmcrth_indan.h>
+#include <math.h>
+#include <expr.h>
+
 
 /////////////////////////////////////////////////////////////////////////////
 // CTmcRTH_IndanTopology
@@ -88,11 +89,17 @@ void CTmcRTH_IndanTopology::ReadLink( CString &csCh, CTmcLibError &cError )
 	expr_del_Blanks2( szBuf1 );
 	if( i1nte_atof_1( szBuf1, &rBuf ) != 0 )
 	{
-		csBuf.Format("In{%s}{%s}%s", csCh, szBuf, expr_get_error() );
+		csBuf.Format("In{%s}{%s}%s", csCh, szBuf1, expr_get_error() );	// N-19
 		cError.PutErrorMessage(csBuf);
 		return;
 	};
 	iBuf = (int)(rBuf);
+	if( (double)iBuf != rBuf )	// N-23: "T 1.7;" is not the block 1
+	{
+		csBuf.Format("In{%s} the block number {%s} must be an integer", (LPCSTR)csCh, szBuf1 );
+		cError.PutErrorMessage(csBuf);
+		return;
+	};
 
 	i+= Search_1Param( csBuf, szBuf+i, cError);
 	
@@ -107,7 +114,7 @@ void CTmcRTH_IndanTopology::ReadLink( CString &csCh, CTmcLibError &cError )
 	expr_del_Blanks2( szBuf1 );
 	if( i1nte_atof_1( szBuf1, &rBuf ) != 0 )
 	{
-		csBuf.Format("In{%s}{%s}%s", csCh, szBuf, expr_get_error() );
+		csBuf.Format("In{%s}{%s}%s", csCh, szBuf1, expr_get_error() );	// N-19
 		cError.PutErrorMessage(csBuf);
 		return;
 	};
@@ -126,7 +133,7 @@ void CTmcRTH_IndanTopology::ReadLink( CString &csCh, CTmcLibError &cError )
 	expr_del_Blanks2( szBuf1 );
 	if( i1nte_atof_1( szBuf1, &rBuf ) != 0 )
 	{
-		csBuf.Format("In{%s}{%s}%s", csCh, szBuf, expr_get_error() );
+		csBuf.Format("In{%s}{%s}%s", csCh, szBuf1, expr_get_error() );	// N-19
 		cError.PutErrorMessage(csBuf);
 		return;
 	};
@@ -135,6 +142,9 @@ void CTmcRTH_IndanTopology::ReadLink( CString &csCh, CTmcLibError &cError )
 	cBlockList.SetLink( iBuf, x0, y0, cError );
 	if( cError.IsError() ) return;
 
+	// Сторона входа по точке привязки: в пределах шага от границы области или
+	// в ближней к ней половине области. Вход INPUT_X по умолчанию левый,
+	// INPUT_Y — верхний; при необходимости тип блока меняется.
 	CTmcRTH_BlockList *pcBl;
 	pcBl = cBlockList.FindBlock( iBuf );
 	if( pcBl->GetnType() == CTMCRTH_BLCKNTYPE_INPXLEFT )
@@ -194,7 +204,7 @@ void CTmcRTH_IndanTopology::ReadLink( CString &csCh, CTmcLibError &cError )
 		{
 			return;
 		};
-		csBuf.Format("%s %d %s in %s section y0 must be %lg - for left input or %lg - for right input", 
+		csBuf.Format("%s %d %s in %s section y0 must be %lg - for bottom input or %lg - for top input", 
 			CTMCRTH_INDANMET_BLOCK, iBuf, CTMCRTH_INDANBLCK_INPUT_Y,
 			CTMCRTH_INDANMET_LINKLIST, pcParam->rYmin/pcParam->rGetLongUnit(), 
 			pcParam->rYmax/pcParam->rGetLongUnit());
@@ -293,17 +303,7 @@ CTmcRTH_BlockList * CTmcRTH_IndanTopology::GetBlockList( void )
 	return &cBlockList;
 }
 
-CTmcRTH_IndanParam * CTmcRTH_IndanTopology::GetpParam( void )
-{
-	return pcParam;
-}
 
-CTmcRTH_IndanTopology& CTmcRTH_IndanTopology::operator=( CTmcRTH_IndanTopology& cTopol )
-{
-	pcParam = cTopol.GetpParam();
-	cBlockList = *cTopol.GetBlockList();
-	return (*this);
-}
 
 int CTmcRTH_IndanTopology::GetBlockNumber( void )
 {

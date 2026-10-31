@@ -1,4 +1,10 @@
+/// @file meshio.cpp
+/// @brief Реализация чтения STL и OBJ (+MTL) и выбора читателя по расширению.
+///
+/// Описание — в meshio.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#mesh-import
 #include "meshio.h"
+#include "lang.h"
 
 #include "stepio.h"
 
@@ -16,11 +22,16 @@ namespace tpl {
 
 namespace {
 
+/// @brief Проверяет, что все три координаты конечны.
+/// @param[in] v  точка.
+/// @return true — нет inf и NaN.
 bool finite(const Vec3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
 /// Двоичный STL: 80 байт заголовка, число треугольников, по 50 байт на треугольник.
 /// Признак надёжный — размер файла сходится с числом треугольников ровно. Слово
 /// `solid` в начале не признак: его пишут в заголовок и двоичного файла многие CAD.
+/// @param[in] b  содержимое файла.
+/// @return true — файл двоичный STL.
 bool looksBinaryStl(const QByteArray &b)
 {
     if (b.size() < 84)
@@ -29,6 +40,10 @@ bool looksBinaryStl(const QByteArray &b)
     return qint64(84) + qint64(n) * 50 == b.size();
 }
 
+/// @brief Читает двоичный STL (float, little-endian); нормали пропускаются.
+/// @param[in] b     содержимое файла (уже проверено `looksBinaryStl`).
+/// @param[in] name  имя единственного тела.
+/// @return Результат с одним телом.
 MeshReadResult readBinaryStl(const QByteArray &b, const QString &name)
 {
     MeshReadResult r;
@@ -61,11 +76,16 @@ MeshReadResult readBinaryStl(const QByteArray &b, const QString &name)
     body.triCount = int(m.tris.size());
     m.bodies << body;
     if (skipped > 0)
-        r.warnings << QStringLiteral("пропущено %1 треугольников с нечисловыми координатами")
+        r.warnings << tpl::tr("пропущено %1 треугольников с нечисловыми координатами",
+                              "skipped %1 triangles with non-numeric coordinates")
                           .arg(skipped);
     return r;
 }
 
+/// @brief Читает текстовый STL: каждое `solid <имя>` — отдельное тело с материалом = имя.
+/// @param[in] b         содержимое файла.
+/// @param[in] fallback  имя тела, если имя после `solid` пусто.
+/// @return Результат; грани не из трёх вершин пропускаются.
 MeshReadResult readAsciiStl(const QByteArray &b, const QString &fallback)
 {
     MeshReadResult r;
@@ -125,11 +145,14 @@ MeshReadResult readAsciiStl(const QByteArray &b, const QString &fallback)
     if (inSolid)
         closeBody();
     if (skipped > 0)
-        r.warnings << QStringLiteral("пропущено %1 граней не из трёх вершин").arg(skipped);
+        r.warnings << tpl::tr("пропущено %1 граней не из трёх вершин",
+                              "skipped %1 faces that do not have three vertices").arg(skipped);
     return r;
 }
 
 /// Цвета материалов из .mtl: имя -> RGB. Только для показа.
+/// @param[in] path  путь к файлу `.mtl`.
+/// @return Имя материала -> цвет 0xRRGGBB по строке `Kd`; пусто, если файл не открылся.
 QHash<QString, std::uint32_t> readMtl(const QString &path)
 {
     QHash<QString, std::uint32_t> out;
@@ -161,7 +184,7 @@ MeshReadResult readStl(const QByteArray &bytes, const QString &fallbackName)
     MeshReadResult r = looksBinaryStl(bytes) ? readBinaryStl(bytes, fallbackName)
                                              : readAsciiStl(bytes, fallbackName);
     if (r.ok() && r.mesh.isEmpty())
-        r.error = QStringLiteral("в файле нет ни одного треугольника");
+        r.error = tpl::tr("в файле нет ни одного треугольника", "the file contains no triangles");
     return r;
 }
 
@@ -259,9 +282,11 @@ MeshReadResult readObj(const QByteArray &bytes, const QString &fallbackName, con
             m.bodies << cur;
     }
     if (skipped > 0)
-        r.warnings << QStringLiteral("пропущено %1 граней со ссылками мимо вершин").arg(skipped);
+        r.warnings << tpl::tr("пропущено %1 граней со ссылками мимо вершин",
+                              "skipped %1 faces referring to missing vertices").arg(skipped);
     if (m.isEmpty())
-        r.error = QStringLiteral("в файле нет ни одной грани (строк f)");
+        r.error = tpl::tr("в файле нет ни одной грани (строк f)",
+                          "the file contains no faces (f lines)");
     return r;
 }
 
@@ -276,7 +301,8 @@ MeshReadResult readMeshFile(const QString &path)
     MeshReadResult r;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
-        r.error = QStringLiteral("файл не открылся: %1").arg(f.errorString());
+        r.error = tpl::tr("файл не открылся: %1",
+                          "the file could not be opened: %1").arg(f.errorString());
         return r;
     }
     const QByteArray bytes = f.readAll();
@@ -284,17 +310,21 @@ MeshReadResult readMeshFile(const QString &path)
         return readStl(bytes, name);
     if (ext == QLatin1String("obj"))
         return readObj(bytes, name, fi.absolutePath());
-    r.error = QStringLiteral("формат .%1 не поддерживается: нужен STL, OBJ%2")
-                  .arg(ext, stepSupported() ? QStringLiteral(" или STEP") : QString());
+    r.error = tpl::tr("формат .%1 не поддерживается: нужен STL, OBJ%2",
+                      "format .%1 is not supported: STL, OBJ%2 is required")
+                  .arg(ext, stepSupported() ? tpl::tr(" или STEP", " or STEP") : QString());
     return r;
 }
 
 QString meshFileFilter()
 {
     return stepSupported()
-               ? QStringLiteral("3D-модели (*.stl *.obj *.step *.stp);;STL (*.stl);;OBJ (*.obj);;"
-                                "STEP (*.step *.stp);;Все файлы (*)")
-               : QStringLiteral("3D-модели (*.stl *.obj);;STL (*.stl);;OBJ (*.obj);;Все файлы (*)");
+               ? tpl::tr("3D-модели (*.stl *.obj *.step *.stp);;STL (*.stl);;OBJ (*.obj);;"
+                         "STEP (*.step *.stp);;Все файлы (*)",
+                         "3D models (*.stl *.obj *.step *.stp);;STL (*.stl);;OBJ (*.obj);;STEP "
+                         "(*.step *.stp);;All files (*)")
+               : tpl::tr("3D-модели (*.stl *.obj);;STL (*.stl);;OBJ (*.obj);;Все файлы (*)",
+                         "3D models (*.stl *.obj);;STL (*.stl);;OBJ (*.obj);;All files (*)");
 }
 
 } // namespace tpl

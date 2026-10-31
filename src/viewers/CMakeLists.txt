@@ -38,7 +38,7 @@ qt_add_qml_module(tamic_viewers
         chart/chartbase.h chart/chartbase.cpp
         chart/charts.h chart/charts.cpp
 )
-target_include_directories(tamic_viewers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/chart)
+target_include_directories(tamic_viewers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../ui ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/chart)
 target_link_libraries(tamic_viewers PUBLIC tamic_viewers_data Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 tamic_generate_theme_tokens(tamic_viewers)
 tamic_set_warnings(tamic_viewers)

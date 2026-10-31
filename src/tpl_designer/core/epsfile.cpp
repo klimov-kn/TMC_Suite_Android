@@ -1,4 +1,10 @@
+/// @file epsfile.cpp
+/// @brief Реализация записи и чтения файла распределения eps в формате ядра (`SaveFileRect`).
+///
+/// Описание — в epsfile.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#eps-file
 #include "epsfile.h"
+#include "lang.h"
 
 #include "expr.h"
 
@@ -17,6 +23,11 @@ namespace {
 /// Так считает ядро (`SetRect`), и так два соседних блока в сумме дают на общем
 /// ребре единицу. Переписать это «понятнее» нельзя — файл обязан совпадать с тем,
 /// что ядро напишет само.
+/// @param[in] i   номер строки узла (0...nY-1).
+/// @param[in] j   номер столбца узла (0...nX-1).
+/// @param[in] nX  число узлов по X.
+/// @param[in] nY  число узлов по Y.
+/// @return Вес узла: 1, 0.5 или 0.25.
 double nodeWeight(int i, int j, int nX, int nY)
 {
     double w = 1.0;
@@ -27,6 +38,10 @@ double nodeWeight(int i, int j, int nX, int nY)
     return w;
 }
 
+/// @brief Формирует строку шапки «тег число» с CRLF (6 значащих цифр).
+/// @param[in] tag  тег с пробелом в конце, например `#dDelta `.
+/// @param[in] v    значение.
+/// @return Строка шапки.
 QByteArray numberLine(const char *tag, double v)
 {
     return QByteArray(tag) + QByteArray::number(v, 'g', 6) + "\r\n";
@@ -100,13 +115,14 @@ QVector<double> epsValues(const EpsGrid &g, const QString &formula, QString *err
     const ExprProgram prog = ExprProgram::compile(formula);
     if (!prog.valid()) {
         if (error)
-            *error = QStringLiteral("формулу не удалось разобрать");
+            *error = tpl::tr("формулу не удалось разобрать", "the formula could not be parsed");
         return out;
     }
     const QStringList unknown = prog.unknown(epsVariables(0.0, 0.0));
     if (!unknown.isEmpty()) {
         if (error)
-            *error = QStringLiteral("в формуле есть имя, которого ядро не знает: %1")
+            *error = tpl::tr("в формуле есть имя, которого ядро не знает: %1",
+                             "the formula contains a name the kernel does not know: %1")
                          .arg(unknown.join(QStringLiteral(", ")));
         return out;
     }
@@ -117,7 +133,8 @@ QVector<double> epsValues(const EpsGrid &g, const QString &formula, QString *err
                 prog.evalEps(g.xMin + j * g.delta, g.yMin + i * g.delta);
             if (!v) {
                 if (error)
-                    *error = QStringLiteral("в узле (%1; %2) формула не даёт числа")
+                    *error = tpl::tr("в узле (%1; %2) формула не даёт числа",
+                                     "at node (%1; %2) the formula gives no number")
                                  .arg(g.xMin + j * g.delta).arg(g.yMin + i * g.delta);
                 out.clear();
                 return out;
@@ -138,7 +155,8 @@ bool readEpsHeader(const QByteArray &data, EpsGrid *out, QString *error)
         return false;
     };
     if (!data.startsWith("#TamicRTH_planar_DistributionDielectricPermeability_File"))
-        return fail(QStringLiteral("это не файл распределения .eps"));
+        return fail(tpl::tr("это не файл распределения .eps",
+                            "this is not a .eps distribution file"));
 
     EpsGrid g;
     bool haveDelta = false, haveNx = false, haveNy = false;
@@ -175,7 +193,8 @@ bool readEpsHeader(const QByteArray &data, EpsGrid *out, QString *error)
         }
     }
     if (!haveDelta || !haveNx || !haveNy || !g.valid())
-        return fail(QStringLiteral("в шапке файла нет шага или размеров сетки"));
+        return fail(tpl::tr("в шапке файла нет шага или размеров сетки",
+                            "the file header has no grid step or grid size"));
     if (out)
         *out = g;
     if (error)

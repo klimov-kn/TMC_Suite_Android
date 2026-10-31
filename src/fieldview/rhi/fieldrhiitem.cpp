@@ -440,6 +440,14 @@ void FieldRenderer::render(QRhiCommandBuffer *cb)
 
 FieldRhiItem::FieldRhiItem(QQuickItem *parent) : QQuickRhiItem(parent)
 {
+    // Касания разбирает TouchGesture: поворот не может начаться во время щипка.
+    setAcceptTouchEvents(true);
+    m_touch.onDrag = [this](const QPointF &d) { rotateBy(d.x(), d.y()); };
+    m_touch.onPinch = [this](double f, const QPointF &c, const QPointF &d) {
+        panBy(d.x(), d.y());
+        zoomAt(f, c.x(), c.y());
+    };
+    m_touch.onDoubleTap = [this](const QPointF &) { resetView(); };
     setSampleCount(4);   // сглаживание линий каркаса и краёв рельефа
     m_fpsClock.start();
 }
@@ -528,6 +536,32 @@ void FieldRhiItem::panBy(double dx, double dy)
 void FieldRhiItem::zoomBy(double factor)
 {
     setZoom(m_zoom * factor);
+}
+
+void FieldRhiItem::zoomAt(double factor, double x, double y)
+{
+    if (width() <= 0 || height() <= 0)
+        return;
+    const double before = m_zoom;
+    setZoom(m_zoom * factor);
+    const double f = before > 0 ? m_zoom / before : 1.0;   // setZoom мог ограничить масштаб
+    const double nx = 2.0 * x / width() - 1.0;
+    const double ny = 1.0 - 2.0 * y / height();
+    m_panX = nx - (nx - m_panX) * f;
+    m_panY = ny - (ny - m_panY) * f;
+    Q_EMIT viewChanged();
+    updatePortLabels();
+    update();
+}
+
+void FieldRhiItem::touchEvent(QTouchEvent *e)
+{
+    m_touch.process(e);
+}
+
+void FieldRhiItem::touchUngrabEvent()
+{
+    m_touch.reset();
 }
 
 QMatrix4x4 FieldRhiItem::viewProjection(double aspect) const

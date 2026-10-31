@@ -7,42 +7,31 @@
 **
 */
 
+/// @file mainwndw.h
+/// @brief Главное текстовое окно DOS-версии TAMIC: цвета, окно статистики, вывод хода расчёта.
+///
+/// Включается препроцессором и sfile95. Из функций определена только заглушка
+/// `stat_messege` (sfile95, s_memf.cpp); остальные в исходниках пакета отсутствуют.
+/// Ход расчёта в этой версии показывает строка состояния окна ядра.
+/// @see https://www.tamic.ru/docs/code/shared-headers.html#legacy-api
 #ifndef _MAINWNDW_H
   #define _MAINWNDW_H
 
-#define MIN_TRACE_DIM  30
 
-struct titel_color_table
-                {
-                 int fgTextColor;
-                 int fgBorder;
-                 int bgBorder;
-                 int fgTBorder;
-                 int bgTBorder;
-                 };
 
-struct window_colors
-                {
-                 int fgGeneralBorder;
-                 int fgTimeColor;
-                 int bgGeneralColor;
-                 int fgWindowColor;
-                 int fgStatisticColor;
-                 int bgStatisticColor;
-                 int fgMenuColor;
-                 };
-
+/// Аргумент `main_window`: без паузы.
 #define NO_PAUSE    0
+/// Аргумент `main_window`: с паузой.
 #define YES_PAUSE   1
 
+/// @brief Рисует главное окно программы.
+/// @param[in] pause_flag  `NO_PAUSE` или `YES_PAUSE`
+/// @param[in] daun_messge_flag  ненулевое — показать нижнюю строку сообщений
+/// @note Определения в исходниках пакета нет (объявление TAMIC); в этой версии не вызывается.
 void main_window( int pause_flag, int daun_messge_flag );
 
 
-#define _STAT_WNDW       0
-#define _OUT_WNDW        1
-#define _LEGEND_WNDW     2
 
-#define MAX_ST_IT_LEN   11
 
 /* ETIME collides with the ETIME macro from modern <errno.h> (UCRT);
    undef it before the enum so the enumerator compiles. win32/win64 build fix. */
@@ -50,42 +39,47 @@ void main_window( int pause_flag, int daun_messge_flag );
 #undef ETIME
 #endif
 
+/// @brief Пункты окна статистики DOS-версии (индекс для `stat_messege`, `put_stat_num`).
 enum ST_ITEMS
            {
+            /// Имя файла.
             SFILE,
+            /// Номер шага.
             STEP,
+            /// Частота.
             FREQ,
+            /// Номер связи.
             ST_LINK,
+            /// Номер блока.
             ST_BLOCK,
+            /// Строка трассировки.
             TRACE,
+            /// Прошедшее время.
             ETIME,
+            /// Оценка оставшегося времени.
             ESTIME,
+            /// Свободная память.
             FREEMEM
             };
 
 
-#define put_step( num )   put_stat_num( STEP, num )
-#define put_link( num )   put_stat_num( ST_LINK, num )
-#define put_block( num )   put_stat_num( ST_BLOCK, num )
+/// Показывает строку трассировки в окне статистики.
 #define put_trace( string)   stat_messege( TRACE, string )
 
-void put_all_statistic( void );
-void draw_windows( void );
-void first_window( int t_num );
-void second_window( int t_num );
-void stat_item( int x, int y, char *item );
-void put_elapsed_time( void );
-void put_time( void );
-void SetTimeFlag( int nFlag );
-void put_frequence( void );
-void put_file_name( void );
+/// @brief Показывает строку в пункте окна статистики.
+/// @param[in] stat_item_num  пункт `ST_ITEMS`
+/// @param[in] string  текст
+/// @note Определена в sfile95 (s_memf.cpp) как пустая заглушка.
 void stat_messege( int stat_item_num, char *string);
+/// @brief Показывает число в пункте окна статистики.
+/// @param[in] stat_item_num  пункт `ST_ITEMS`
+/// @param[in] put_num  число
+/// @note Определения в исходниках пакета нет (объявление TAMIC); в этой версии не вызывается.
 void put_stat_num( int stat_item_num, int put_num );
 
+/// @brief Возвращает объём свободной памяти DOS.
+/// @return Свободная память (килобайты или параграфы — зависит от варианта DOS).
+/// @note Определения в исходниках пакета нет (объявление TAMIC); в этой версии не вызывается.
   int       get_dos_freemem( void );
-
-void put_free_mem( void );
-void drow_statistic_window( void );
-void OutPercent( char *title, int nPercent );
 
 #endif

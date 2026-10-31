@@ -1,3 +1,9 @@
+/// @file rf.cpp
+/// @brief Реализация формул паспортов образцов (волноводы, фильтры, микрополоска, ЭПР).
+///
+/// Часть модуля «Ядро TPL Designer», каталог образцов. Описание открытых функций —
+/// в `rf.h`.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#samples
 #include "rf.h"
 
 #include "physics.h"
@@ -54,6 +60,10 @@ double shuntReflection(double b)
 namespace {
 
 /// Продольное волновое число H10 с ветвью, дающей затухание: exp(-j kz z) убывает.
+/// @param[in] aMm   ширина волновода, мм; <= 0 — свободное пространство (kc = 0)
+/// @param[in] eps   комплексная проницаемость среды
+/// @param[in] fGHz  частота, ГГц
+/// @return kz, рад/мм (мнимая часть <= 0).
 cplx kz(double aMm, cplx eps, double fGHz)
 {
     const double k0 = 2 * kPi / lambda0(fGHz);
@@ -156,6 +166,12 @@ double msPlanarWidth(double z0, double epsEff, double hMm)
 namespace {
 
 /// Интеграл Симпсона.
+/// @tparam F  вызываемый объект `double(double)`
+/// @param[in] f  подынтегральная функция
+/// @param[in] a  нижний предел
+/// @param[in] b  верхний предел
+/// @param[in] n  число отрезков (нечётное увеличивается на 1)
+/// @return Приближённое значение интеграла.
 template <typename F>
 double simpson(F f, double a, double b, int n)
 {

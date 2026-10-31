@@ -1,4 +1,10 @@
+/// @file sigfile.cpp
+/// @brief Реализация форм сигнала, плана и текста файла `.sig`, разбора чужих файлов.
+///
+/// Описание — в sigfile.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#sig-file
 #include "sigfile.h"
+#include "lang.h"
 
 #include "cp1251.h"
 #include "emitter.h"
@@ -14,6 +20,7 @@ namespace tpl {
 
 namespace {
 
+/// Число pi.
 constexpr double kPi = 3.14159265358979323846;
 
 /// Свет в мм/нс. Шаг ядра — это `DELTA/(c*sqrt(2))`, и обе величины здесь в
@@ -40,6 +47,8 @@ const double kMonoNorm = std::sqrt(2.0 / std::exp(1.0));
 /// сглаживание обоих краёв дало расхождение с эталонным свипом 1.9 дБ вместо 0.0004,
 /// причём задание при этом считалось и выглядело исправным. Обрыв в конце безобиден:
 /// счёт на нём и кончается.
+/// @param[in] u  доля пути внутри посылки (0...1).
+/// @return Множитель 0...1: косинусный подъём на u < 0.05, затем 1; вне (0; 1] — 0.
 double taper(double u)
 {
     constexpr double kEdge = 0.05;
@@ -51,18 +60,28 @@ double taper(double u)
 }
 
 /// Доля пути внутри посылки: 0 в начале, 1 в конце. Вне посылки — вне [0;1].
+/// @param[in] t         время, нс.
+/// @param[in] start     начало посылки, нс.
+/// @param[in] duration  длительность посылки, нс.
+/// @return (t - start) / duration; -1 при нулевой длительности.
 double phaseOf(double t, double start, double duration)
 {
     return duration > 0.0 ? (t - start) / duration : -1.0;
 }
 
 /// Период повторения, нс, по частоте в ГГц. 1 ГГц — это ровно 1 нс.
+/// @param[in] fGhz  частота, ГГц.
+/// @return Период 1/f, нс; 0 при f <= 0.
 double periodNs(double fGhz)
 {
     return fGhz > 0.0 ? 1.0 / fGhz : 0.0;
 }
 
 /// Пила, треугольник и меандр: где мы внутри периода, 0...1.
+/// @param[in] t      время, нс.
+/// @param[in] start  начало сигнала, нс.
+/// @param[in] fGhz   частота повторения, ГГц.
+/// @return Положение внутри периода 0...1.
 double cyclePos(double t, double start, double fGhz)
 {
     const double T = periodNs(fGhz);
@@ -78,11 +97,17 @@ double cyclePos(double t, double start, double fGhz)
 /// всех форм один смысл у поля «начало», и импульс не уезжает за ноль, где ядро
 /// его просто не увидит. Три tau с каждой стороны — exp(-9) = 1.2e-4, ниже
 /// разрядности файла.
+/// @param[in] w  параметры сигнала (`start`, `width`).
+/// @return Момент максимума гауссовой шапки start + 3*tau, нс.
 double gaussCenter(const Waveshape &w)
 {
     return w.start + 3.0 * std::max(w.width, 1e-9);
 }
 
+/// @brief Форматирует число для текста `.sig` (формат 'g').
+/// @param[in] v       значение.
+/// @param[in] digits  число значащих цифр.
+/// @return Строка числа.
 QString num(double v, int digits = 6)
 {
     QString s = QString::number(v, 'g', digits);
@@ -140,79 +165,105 @@ QString waveformName(Waveform k)
 {
     switch (k) {
     case Waveform::MultiTone:
-        return QStringLiteral("Гребёнка тонов");
+        return tpl::tr("Гребёнка тонов", "Tone comb");
     case Waveform::Chirp:
-        return QStringLiteral("ЛЧМ (чирп)");
+        return tpl::tr("ЛЧМ (чирп)", "LFM (chirp)");
     case Waveform::SineBurst:
-        return QStringLiteral("Посылка синуса");
+        return tpl::tr("Посылка синуса", "Sine burst");
     case Waveform::GaussRf:
-        return QStringLiteral("Радиоимпульс");
+        return tpl::tr("Радиоимпульс", "RF pulse");
     case Waveform::GaussVideo:
-        return QStringLiteral("Видеоимпульс");
+        return tpl::tr("Видеоимпульс", "Video pulse");
     case Waveform::Monocycle:
-        return QStringLiteral("Моноцикл");
+        return tpl::tr("Моноцикл", "Monocycle");
     case Waveform::Trapezoid:
-        return QStringLiteral("Трапеция");
+        return tpl::tr("Трапеция", "Trapezoid");
     case Waveform::Sawtooth:
-        return QStringLiteral("Пила");
+        return tpl::tr("Пила", "Sawtooth");
     case Waveform::Triangle:
-        return QStringLiteral("Треугольник");
+        return tpl::tr("Треугольник", "Triangle");
     case Waveform::Square:
-        return QStringLiteral("Меандр");
+        return tpl::tr("Меандр", "Square wave");
     case Waveform::Expression:
-        return QStringLiteral("Своя формула");
+        return tpl::tr("Своя формула", "Custom formula");
     case Waveform::Table:
-        return QStringLiteral("Своя таблица");
+        return tpl::tr("Своя таблица", "Custom table");
     }
-    return QStringLiteral("Сигнал");
+    return tpl::tr("Сигнал", "Signal");
 }
 
 QString waveformHint(Waveform k)
 {
     switch (k) {
     case Waveform::MultiTone:
-        return QStringLiteral("Все частоты полосы сразу, за ОДИН проход вместо свипа. "
-                              "Список тонов уходит в файл строкой #FREQ, и постобработка "
-                              "берёт их точными.");
+        return tpl::tr("Все частоты полосы сразу, за ОДИН проход вместо свипа. "
+                       "Список тонов уходит в файл строкой #FREQ, и постобработка "
+                       "берёт их точными.",
+                       "All frequencies of the band at once, in ONE run instead of a sweep. The "
+                       "tone list goes into the file as the #FREQ line, and post-processing takes "
+                       "the tones exactly.");
     case Waveform::Chirp:
-        return QStringLiteral("Несущая плавно едет от нижней частоты к верхней. Спектр "
-                              "гладкий, полосу постобработка находит сама.");
+        return tpl::tr("Несущая плавно едет от нижней частоты к верхней. Спектр "
+                       "гладкий, полосу постобработка находит сама.",
+                       "The carrier glides smoothly from the lower frequency to the upper one. "
+                       "The spectrum is smooth; post-processing finds the band by itself.");
     case Waveform::SineBurst:
-        return QStringLiteral("Несколько периодов синуса. Один период — «моноимпульс»: "
-                              "самый короткий широкополосный сигнал с несущей.");
+        return tpl::tr("Несколько периодов синуса. Один период — «моноимпульс»: "
+                       "самый короткий широкополосный сигнал с несущей.",
+                       "Several periods of a sine. One period is a \"monopulse\": the shortest "
+                       "wideband signal with a carrier.");
     case Waveform::GaussRf:
-        return QStringLiteral("Несущая под гауссовой огибающей. Гладкие края, спектр — "
-                              "колокол вокруг несущей.");
+        return tpl::tr("Несущая под гауссовой огибающей. Гладкие края, спектр — "
+                       "колокол вокруг несущей.",
+                       "A carrier under a Gaussian envelope. Smooth edges; the spectrum is a bell "
+                       "around the carrier.");
     case Waveform::GaussVideo:
-        return QStringLiteral("Гауссова шапка без несущей. Спектр от нуля: годится, чтобы "
-                              "посмотреть отклик во времени, а не на частоте.");
+        return tpl::tr("Гауссова шапка без несущей. Спектр от нуля: годится, чтобы "
+                       "посмотреть отклик во времени, а не на частоте.",
+                       "A Gaussian bump without a carrier. The spectrum starts at zero: suitable "
+                       "for looking at the response in time rather than in frequency.");
     case Waveform::Monocycle:
-        return QStringLiteral("Производная гаусса: нулевое среднее и спектр без постоянной "
-                              "составляющей. Классика импульсной рефлектометрии.");
+        return tpl::tr("Производная гаусса: нулевое среднее и спектр без постоянной "
+                       "составляющей. Классика импульсной рефлектометрии.",
+                       "Derivative of a Gaussian: zero mean and a spectrum without a DC "
+                       "component. A classic of time-domain reflectometry.");
     case Waveform::Trapezoid:
-        return QStringLiteral("Видеоимпульс с заданными фронтом и спадом. Чем круче фронт, "
-                              "тем шире спектр.");
+        return tpl::tr("Видеоимпульс с заданными фронтом и спадом. Чем круче фронт, "
+                       "тем шире спектр.",
+                       "A video pulse with given rise and fall times. The steeper the rise, the "
+                       "wider the spectrum.");
     case Waveform::Sawtooth:
-        return QStringLiteral("Пила. Все гармоники частоты повторения сразу, амплитуда "
-                              "падает как 1/n.");
+        return tpl::tr("Пила. Все гармоники частоты повторения сразу, амплитуда "
+                       "падает как 1/n.",
+                       "Sawtooth. All harmonics of the repetition frequency at once; the "
+                       "amplitude falls as 1/n.");
     case Waveform::Triangle:
-        return QStringLiteral("Треугольник. Только нечётные гармоники, спад как 1/n^2 — "
-                              "спектр уже, чем у пилы.");
+        return tpl::tr("Треугольник. Только нечётные гармоники, спад как 1/n^2 — "
+                       "спектр уже, чем у пилы.",
+                       "Triangle. Only odd harmonics, falling as 1/n^2: the spectrum is narrower "
+                       "than that of the sawtooth.");
     case Waveform::Square:
-        return QStringLiteral("Меандр. Нечётные гармоники, спад как 1/n; фронты отвесные, "
-                              "так что спектр самый широкий из периодических.");
+        return tpl::tr("Меандр. Нечётные гармоники, спад как 1/n; фронты отвесные, "
+                       "так что спектр самый широкий из периодических.",
+                       "Square wave. Odd harmonics falling as 1/n; the edges are vertical, so the "
+                       "spectrum is the widest of the periodic ones.");
     case Waveform::Expression:
-        return QStringLiteral("Формула a(t) — любая, какую вздумается. Переменная одна: t в "
-                              "нс. Считаем её мы, в файл уходят числа.");
+        return tpl::tr("Формула a(t) — любая, какую вздумается. Переменная одна: t в "
+                       "нс. Считаем её мы, в файл уходят числа.",
+                       "Formula a(t): any you like. There is one variable: t in ns. We evaluate "
+                       "it, and numbers go into the file.");
     case Waveform::Table:
-        return QStringLiteral("Готовые точки: две колонки «время, значение». Так вкладывают "
-                              "измеренный или посчитанный на стороне сигнал.");
+        return tpl::tr("Готовые точки: две колонки «время, значение». Так вкладывают "
+                       "измеренный или посчитанный на стороне сигнал.",
+                       "Ready-made points: two columns \"time, value\". This is how a measured "
+                       "signal or one computed elsewhere is supplied.");
     }
     return QString();
 }
 
 TimeWindow waveSupport(const Waveshape &w)
 {
+    // Опора: от начала сигнала до конца посылки по виду формы.
     const double t0 = w.start;
     switch (w.kind) {
     case Waveform::MultiTone:
@@ -327,6 +378,9 @@ double suggestedFreq(const Waveshape &w)
 
 QString plural(int n, const QString &one, const QString &few, const QString &many)
 {
+    // По-английски форм две: «one» только у единицы, иначе «many» (few не нужна).
+    if (english())
+        return QStringLiteral("%1 %2").arg(n).arg(std::abs(n) == 1 ? one : many);
     const int a = std::abs(n) % 100;
     const int b = a % 10;
     QString word = many;
@@ -505,47 +559,54 @@ double wavePeak(const Waveshape &w)
 QString waveshapeSummary(const Waveshape &w)
 {
     const TimeWindow s = waveSupport(w);
-    const QString len = QStringLiteral("%1...%2 нс").arg(num(s.tMin, 4), num(s.tMax, 4));
+    const QString len = tpl::tr("%1...%2 нс", "%1...%2 ns").arg(num(s.tMin, 4), num(s.tMax, 4));
     switch (w.kind) {
     case Waveform::MultiTone:
-        return QStringLiteral("%1 %2...%3 ГГц с шагом %4 ГГц, %5")
-            .arg(plural(std::max(2, w.tones), QStringLiteral("тон"), QStringLiteral("тона"),
-                        QStringLiteral("тонов")),
+        return tpl::tr("%1 %2...%3 ГГц с шагом %4 ГГц, %5",
+                       "%1 %2...%3 GHz with a step of %4 GHz, %5")
+            .arg(plural(std::max(2, w.tones), tpl::tr("тон", "tone"), tpl::tr("тона", "tones"),
+                        tpl::tr("тонов", "tones")),
                  num(std::min(w.f1, w.f2), 4), num(std::max(w.f1, w.f2), 4),
                  num(std::fabs(w.f2 - w.f1) / std::max(1, std::max(2, w.tones) - 1), 3), len);
     case Waveform::Chirp:
-        return QStringLiteral("несущая от %1 до %2 ГГц за %3 нс, %4")
+        return tpl::tr("несущая от %1 до %2 ГГц за %3 нс, %4",
+                       "carrier from %1 to %2 GHz over %3 ns, %4")
             .arg(num(std::min(w.f1, w.f2), 4), num(std::max(w.f1, w.f2), 4),
                  num(w.duration, 4), len);
     case Waveform::SineBurst:
-        return QStringLiteral("%1 на %2 ГГц, %3")
-            .arg(plural(std::max(1, w.periods), QStringLiteral("период"),
-                        QStringLiteral("периода"), QStringLiteral("периодов")),
+        return tpl::tr("%1 на %2 ГГц, %3", "%1 at %2 GHz, %3")
+            .arg(plural(std::max(1, w.periods), tpl::tr("период", "period"),
+                        tpl::tr("периода", "periods"), tpl::tr("периодов", "periods")),
                  num(w.f1, 4), len);
     case Waveform::GaussRf:
-        return QStringLiteral("несущая %1 ГГц, огибающая tau = %2 нс, %3")
+        return tpl::tr("несущая %1 ГГц, огибающая tau = %2 нс, %3",
+                       "carrier %1 GHz, envelope tau = %2 ns, %3")
             .arg(num(w.f1, 4), num(w.width, 4), len);
     case Waveform::GaussVideo:
-        return QStringLiteral("шапка tau = %1 нс, %2").arg(num(w.width, 4), len);
+        return tpl::tr("шапка tau = %1 нс, %2", "bump tau = %1 ns, %2").arg(num(w.width, 4), len);
     case Waveform::Monocycle:
-        return QStringLiteral("моноцикл tau = %1 нс, %2").arg(num(w.width, 4), len);
+        return tpl::tr("моноцикл tau = %1 нс, %2",
+                       "monocycle tau = %1 ns, %2").arg(num(w.width, 4), len);
     case Waveform::Trapezoid:
-        return QStringLiteral("фронт %1 / полка %2 / спад %3 нс, %4")
+        return tpl::tr("фронт %1 / полка %2 / спад %3 нс, %4",
+                       "rise %1 / flat top %2 / fall %3 ns, %4")
             .arg(num(w.rise, 3), num(w.duration, 3), num(w.fall, 3), len);
     case Waveform::Sawtooth:
     case Waveform::Triangle:
     case Waveform::Square:
-        return QStringLiteral("частота повторения %1 ГГц (период %2 нс), посылка %3")
+        return tpl::tr("частота повторения %1 ГГц (период %2 нс), посылка %3",
+                       "repetition frequency %1 GHz (period %2 ns), burst %3")
             .arg(num(w.f1, 4), num(periodNs(w.f1), 4), len);
     case Waveform::Expression:
         return QStringLiteral("a(t) = %1, %2").arg(w.expression, len);
     case Waveform::Table:
         return w.points.size() >= 2
                    ? QStringLiteral("%1, %2")
-                         .arg(plural(int(w.points.size()), QStringLiteral("точка"),
-                                     QStringLiteral("точки"), QStringLiteral("точек")),
+                         .arg(plural(int(w.points.size()), tpl::tr("точка", "point"),
+                                     tpl::tr("точки", "points"), tpl::tr("точек", "points")),
                               len)
-                   : QStringLiteral("таблица пуста — нужно не меньше двух точек");
+                   : tpl::tr("таблица пуста — нужно не меньше двух точек",
+                             "the table is empty - at least two points are needed");
     }
     return QString();
 }
@@ -600,34 +661,48 @@ QString sigFileText(const Project &p, const Port &port)
     const ExprProgram prog = waveProgram(w);
 
     QStringList L;
-    L << QStringLiteral("! Файл падающей волны для порта «%1» задания %2.tpl")
+    L << tpl::tr("! Файл падающей волны для порта «%1» задания %2.tpl",
+                 "! Incident-wave file for port \"%1\" of task %2.tpl")
              .arg(port.name, p.name);
-    L << QStringLiteral("! Порождён TPL Designer. Править руками не нужно: форма и её");
-    L << QStringLiteral("! параметры записаны ниже служебной строкой, и программа читает");
-    L << QStringLiteral("! файл обратно по ней.");
+    L << tpl::tr("! Порождён TPL Designer. Править руками не нужно: форма и её",
+                 "! Produced by TPL Designer. No need to edit it by hand: the waveform and its");
+    L << tpl::tr("! параметры записаны ниже служебной строкой, и программа читает",
+                 "! parameters are recorded below in a service line, and the program reads");
+    L << tpl::tr("! файл обратно по ней.", "! the file back from it.");
     L << QStringLiteral("!");
-    L << QStringLiteral("! Форма: %1 — %2").arg(waveformName(w.kind), waveshapeSummary(w));
-    L << QStringLiteral("! Амплитуда безразмерна: единиц напряжения в языке задания нет.");
+    L << tpl::tr("! Форма: %1 — %2",
+                 "! Waveform: %1 -- %2").arg(waveformName(w.kind), waveshapeSummary(w));
+    L << tpl::tr("! Амплитуда безразмерна: единиц напряжения в языке задания нет.",
+                 "! The amplitude is dimensionless: the task language has no voltage units.");
     if (w.kind == Waveform::MultiTone) {
-        L << QStringLiteral("! Каждый тон идёт с полной амплитудой %1, поэтому пик суммы")
+        L << tpl::tr("! Каждый тон идёт с полной амплитудой %1, поэтому пик суммы",
+                     "! Each tone has the full amplitude %1, so the peak of the sum")
                  .arg(formatCompact(w.amplitude));
-        L << QStringLiteral("! доходит до %1. Так сделано нарочно: возбуждение каждой частоты")
+        L << tpl::tr("! доходит до %1. Так сделано нарочно: возбуждение каждой частоты",
+                     "! reaches %1. This is intentional: the excitation of each frequency")
                  .arg(formatCompact(wavePeak(w)));
-        L << QStringLiteral("! получается таким же, как у одночастотного расчёта с Amp = %1.")
+        L << tpl::tr("! получается таким же, как у одночастотного расчёта с Amp = %1.",
+                     "! is the same as in a single-frequency run with Amp = %1.")
                  .arg(formatCompact(w.amplitude));
     }
     L << QStringLiteral("!");
-    L << QStringLiteral("! Две колонки: время в TIME_UNIT задания (нс) и безразмерное a(t).");
-    L << QStringLiteral("! Строки с «!» и «#» ядро считает комментариями.");
-    L << QStringLiteral("! Шаг записи %1 нс — вдвое мельче шага ядра %2 нс (DELTA/(c*sqrt(2))).")
+    L << tpl::tr("! Две колонки: время в TIME_UNIT задания (нс) и безразмерное a(t).",
+                 "! Two columns: time in the task's TIME_UNIT (ns) and dimensionless a(t).");
+    L << tpl::tr("! Строки с «!» и «#» ядро считает комментариями.",
+                 "! The kernel treats lines starting with \"!\" and \"#\" as comments.");
+    L << tpl::tr("! Шаг записи %1 нс — вдвое мельче шага ядра %2 нс (DELTA/(c*sqrt(2))).",
+                 "! Sample step %1 ns -- half the kernel step %2 ns (DELTA/(c*sqrt(2))).")
              .arg(num(plan.dt, 6), num(plan.kernelDt, 6));
-    L << QStringLiteral("! Между точками ядро интерполирует линейно.");
+    L << tpl::tr("! Между точками ядро интерполирует линейно.",
+                 "! Between points the kernel interpolates linearly.");
     if (plan.coarsened) {
         // В файл идут только символы, которые есть в CP1251: ни стрелок, ни знака
         // внимания, ни греческих букв — иначе toCp1251 поднимет флаг lossy и запись
         // задания встанет из-за косметики в комментарии.
-        L << QStringLiteral("! ВНИМАНИЕ: шаг укрупнён до %1 нс, чтобы файл не распух: "
-                            "точек и так %2.")
+        L << tpl::tr("! ВНИМАНИЕ: шаг укрупнён до %1 нс, чтобы файл не распух: "
+                     "точек и так %2.",
+                     "! WARNING: the step is coarsened to %1 ns so that the file does not swell: "
+                     "there are already %2 points.")
                  .arg(num(plan.dt, 6)).arg(plan.points);
     }
     L << QStringLiteral("!");
@@ -659,9 +734,13 @@ QString sigFileText(const Project &p, const Port &port)
     L << QStringLiteral("!");
 
     if (!tones.isEmpty()) {
-        L << QStringLiteral("! Строка #FREQ называет тоны, которые лежат в сигнале (в FREQ_UNIT).");
-        L << QStringLiteral("! Она обязательна для многотона: искать тоны потом по спектру");
-        L << QStringLiteral("! НЕточно — соседние линии смещают пики друг друга.");
+        L << tpl::tr("! Строка #FREQ называет тоны, которые лежат в сигнале (в FREQ_UNIT).",
+                     "! The #FREQ line names the tones contained in the signal (in FREQ_UNIT).");
+        L << tpl::tr("! Она обязательна для многотона: искать тоны потом по спектру",
+                     "! It is mandatory for a multitone: searching for tones later in the "
+                     "spectrum");
+        L << tpl::tr("! НЕточно — соседние линии смещают пики друг друга.",
+                     "! is INACCURATE -- neighbouring lines shift each other's peaks.");
         // Больше 99 тонов пакет не берёт нигде: ни диаграмма направленности, ни
         // постобработка. Ядро отбросило бы лишние молча, поэтому обрезаем сами и
         // говорим об этом прямо в файле — и в проверке задания.
@@ -671,10 +750,13 @@ QString sigFileText(const Project &p, const Port &port)
         // тонов по десять значащих цифр в него укладываются с запасом (меньше 1300).
         const int n = std::min<int>(tones.size(), kMaxFreqs);
         if (tones.size() > kMaxFreqs) {
-            L << QStringLiteral("! ВНИМАНИЕ: тонов в сигнале %1, а пакет берёт не больше %2. "
-                                "Записаны первые %2,")
+            L << tpl::tr("! ВНИМАНИЕ: тонов в сигнале %1, а пакет берёт не больше %2. "
+                         "Записаны первые %2,",
+                         "! WARNING: the signal has %1 tones, but the package takes at most %2. "
+                         "The first %2 are written,")
                      .arg(tones.size()).arg(kMaxFreqs);
-            L << QStringLiteral("! остальные %1 в сигнале остаются, но не обрабатываются.")
+            L << tpl::tr("! остальные %1 в сигнале остаются, но не обрабатываются.",
+                         "! the remaining %1 stay in the signal but are not processed.")
                      .arg(tones.size() - kMaxFreqs);
         }
         QStringList t;
@@ -682,9 +764,11 @@ QString sigFileText(const Project &p, const Port &port)
             t << formatCompact(tones.at(i));
         L << QStringLiteral("#FREQ %1").arg(t.join(QLatin1Char(' ')));
     } else if (band.known) {
-        L << QStringLiteral("! Спектр гладкий, поэтому строки #FREQ здесь нет: полосу %1...%2 ГГц")
+        L << tpl::tr("! Спектр гладкий, поэтому строки #FREQ здесь нет: полосу %1...%2 ГГц",
+                     "! The spectrum is smooth, so there is no #FREQ line here: post-processing "
+                     "finds the band %1...%2 GHz")
                  .arg(num(band.lo, 4), num(band.hi, 4));
-        L << QStringLiteral("! постобработка находит сама.");
+        L << tpl::tr("! постобработка находит сама.", "! by itself.");
     }
     L << QStringLiteral("! t[ns]                a");
 
@@ -801,12 +885,16 @@ QString toneCutNotice(const QVector<double> &tones)
 {
     if (tones.size() <= kMaxFreqs)
         return QString();
-    return QStringLiteral("Строка #FREQ в файле называет %1, а пакет берёт не больше %2 — "
-                          "больше не умеют ни диаграмма направленности, ни постобработка.\n\n"
-                          "В задание пойдут первые %2 (%3…%4 ГГц), остальные %5 отброшены. "
-                          "Сам сигнал не тронут: точки взяты все.")
-        .arg(plural(int(tones.size()), QStringLiteral("тон"), QStringLiteral("тона"),
-                    QStringLiteral("тонов")))
+    return tpl::tr("Строка #FREQ в файле называет %1, а пакет берёт не больше %2 — "
+                   "больше не умеют ни диаграмма направленности, ни постобработка.\n\n"
+                   "В задание пойдут первые %2 (%3…%4 ГГц), остальные %5 отброшены. "
+                   "Сам сигнал не тронут: точки взяты все.",
+                   "The #FREQ line in the file names %1, but the package takes at most %2 - "
+                   "neither the radiation pattern nor post-processing can handle more.\n\nThe "
+                   "first %2 (%3...%4 GHz) will go into the task, the remaining %5 are discarded. "
+                   "The signal itself is untouched: all points are taken.")
+        .arg(plural(int(tones.size()), tpl::tr("тон", "tone"), tpl::tr("тона", "tones"),
+                    tpl::tr("тонов", "tones")))
         .arg(kMaxFreqs)
         .arg(formatCompact(tones.first()), formatCompact(tones.at(kMaxFreqs - 1)))
         .arg(tones.size() - kMaxFreqs);

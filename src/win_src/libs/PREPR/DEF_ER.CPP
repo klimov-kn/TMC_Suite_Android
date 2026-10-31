@@ -13,8 +13,14 @@
 **
 */
 
+/// @file def_er.cpp
+/// @brief Таблица текстов для кодов возврата препроцессора (`def_err_get`).
+///
+/// Часть модуля «Библиотека prepr». Индекс таблицы — модуль кода (0..11).
+/// @see https://www.tamic.ru/docs/code/lib-prepr.html#errors
 
-#include "Prepr1.h"
+
+#include "prepr1.h"
 
 const char  *def_err_get( int i_err )
  {

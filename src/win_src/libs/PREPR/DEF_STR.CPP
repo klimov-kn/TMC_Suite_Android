@@ -24,19 +24,28 @@
 **
 */
 
+/// @file def_str.cpp
+/// @brief Низкоуровневые операции со связным буфером: чтение, вставка, удаление, сравнение, лексемы.
+///
+/// Часть модуля «Библиотека prepr». Все функции работают с символами, следующими за
+/// текущим узлом `inp_p`; вставка берёт узлы из списка свободных, удаление возвращает
+/// их туда же. Здесь же чтение имени макроса и фактического параметра вызова.
+/// @see https://www.tamic.ru/docs/code/lib-prepr.html#buffer
+
 #include <stdio.h>
 
-#include <Typedef.h>
-#include <Error1.h>
+#include <typedef.h>
+#include <error1.h>
 
-#include "Prepr1.h"
+#include "prepr1.h"
 
 
 int  buf_gets( char *str, int n, BUFFER *buf)
  {
-  int  i, j;
+  int  i, j, j1;
 
-  j = buf->inp_p;
+  j1 = buf->inp_p;
+  j = j1;   // N-25: j was not set when no character is read
 
   if( buf->inp_p >= 0) buf->inp_p = buf->ilex[buf->inp_p];
 
@@ -52,68 +61,15 @@ int  buf_gets( char *str, int n, BUFFER *buf)
   if( buf->inp_p < 0 )
    {
     buf->inp_p = j;
-  //  put_error_messege( "Buffer is small" );
     return( BUF_EOF );
     };
 
   if( BUF_LEX == '\0') return( BUF_NULL );
 
-//  put_error_messege( "Long string" );
   return( BUF_ABN );
   }
 
-int  buf_puts( char *str, BUFFER *buf)
- {
-  int i, j, j1;
 
-  j = buf->ilex[buf->inp_p];
-  buf->ilex[buf->inp_p] = buf->inp_p_nul;
-
-  for( i = 0; ( BUF_STR_I != '\0' )&&( buf->inp_p_nul >= 0 ); i++)
-   {
-    BUF_LEX_NUL = BUF_STR_I;
-    buf->inp_p_nul = buf->ilex[buf->inp_p_nul];
-    };
-
-  if( buf->inp_p_nul < 0 )
-   {
-    put_error_messege( "Small buffer" );
-    return( BUF_ABN );
-    }
-
-  BUF_LEX_NUL = BUF_STR_I;
-  j1 = buf->inp_p_nul;
-  buf->inp_p_nul = buf->ilex[buf->inp_p_nul];
-  buf->ilex[j1] = j;
-
-  return( BUF_NULL );
-  }
-
-int  buf_puts1( char *str, BUFFER *buf )
- {
-  int i, j, j1;
-
-  j = buf->ilex[buf->inp_p];
-  buf->ilex[buf->inp_p] = buf->inp_p_nul;
-
-  for( i = 0; ( str[i+1] != '\0' )&&( buf->inp_p_nul >= 0 ); i++)
-   {
-    BUF_LEX_NUL = BUF_STR_I;
-    buf->inp_p_nul = buf->ilex[buf->inp_p_nul];
-    };
-  if( buf->inp_p_nul < 0 )
-   {
-    put_error_messege( "Small buffer" );
-    return( BUF_ABN );
-    }
-
-  BUF_LEX_NUL = BUF_STR_I;
-  j1 = buf->inp_p_nul;
-  buf->inp_p_nul = buf->ilex[buf->inp_p_nul];
-  buf->ilex[j1] = j;
-
-  return( BUF_NULL );
-  }
 
 int  buf_puts2( char *str, BUFFER *buf)
  {
@@ -178,6 +134,8 @@ int  buf_dels( BUFFER *buf, int n)
  {
   int i, j, j1;
 
+  // Удаляемая цепочка (от узла после inp_p до n-го) целиком становится головой списка
+  // свободных узлов, а inp_p связывается с узлом, следующим за ней.
   j = buf->inp_p;
   j1 = buf->inp_p_nul;
   buf->inp_p_nul = buf->ilex[j];
@@ -230,6 +188,11 @@ int   def_buf_gets_mac( BUFFER *buf, char *mac1)
       };
 
     buf->inp_p = buf->ilex[buf->inp_p];
+    if( buf->inp_p < 0 )   // N-25: end of the chain, lsplex[-1] is outside the buffer
+     {
+      mac1[i] = '\0';
+      return( BUF_EOF );
+      };
     ch = buf->lsplex[buf->inp_p];
     if( ( (ch <= 'z')&&(ch >= 'a') )||
         ( (ch <= 'Z')&&(ch >= 'A') )||
@@ -266,6 +229,11 @@ int   def_buf_gets_param( BUFFER *buf, char *mac1)
       }
 
     buf->inp_p = buf->ilex[buf->inp_p];
+    if( buf->inp_p < 0 )   // N-25: end of the chain, lsplex[-1] is outside the buffer
+     {
+      put_error_messege( "Small buffer" );
+      return( BUF_EOF );
+      }
     ch = buf->lsplex[buf->inp_p];
     switch( ch )
      {
@@ -277,7 +245,7 @@ int   def_buf_gets_param( BUFFER *buf, char *mac1)
 
       case ';' : if( jb == 0 )
 		  {
-                   if( (mac1[0] == '(')&&(mac1[i-1] == ')') )
+                   if( (i > 0)&&(mac1[0] == '(')&&(mac1[i-1] == ')') )   // N-25: mac1[-1] at i == 0
                          {
                           mac1[i-1] = ' ';
                           mac1[0] = ' ';
@@ -305,6 +273,7 @@ int   buf_cmpn( BUFFER *buf, int n, char *mac)
    {
     if( p < 0 ) return( BUF_EOF );
     p = buf->ilex[p];
+    if( p < 0 ) return( BUF_EOF );   /* end of chain: lsplex[-1] is outside the buffer */
 
     if( buf->lsplex[p] != mac[i])  return( BUF_EOF );
     }
@@ -322,6 +291,7 @@ int   buf_cmpn2( BUFFER *buf, int n, char *mac1, char *mac2 )
    {
     if( p < 0 ) return( BUF_EOF );
     p = buf->ilex[p];
+    if( p < 0 ) return( BUF_EOF );   /* end of chain: lsplex[-1] is outside the buffer */
     if( ((buf->lsplex[p] != mac1[i])&&(buf->lsplex[p] != mac2[i])) )  return( BUF_EOF );
     }
 

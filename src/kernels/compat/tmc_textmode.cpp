@@ -1,62 +1,18 @@
-// tmc_textmode.cpp — текстовый режим файлов и поиск имени, как в Windows.
-//
-// ИСТОЧНИК: src/compat/tmc_textmode.cpp версии для macOS,
-// перенесён без изменения логики. Добавлено для Android (bionic, этап П1): в
-// bionic НЕТ fopencookie (в заголовках NDK r27 его нет вовсе), но есть funopen
-// с той же подписью, что в Darwin (fpos_t в bionic — off_t, целое; ISSUES И-4),
-// поэтому Android идёт по ветке macOS (TMC_TEXTMODE_FUNOPEN).
-//
-// ЗАЧЕМ. Файлы заданий и текстовые результаты TMC записаны с окончаниями строк
-// CRLF. На Windows `fopen(..., "r")` открывает поток в ТЕКСТОВОМ режиме: при
-// чтении пара CRLF превращается в один перевод строки, при записи наоборот.
-// На Linux и на macOS текстовый режим ничем не отличается от двоичного, поэтому
-// символ возврата каретки доживает до разбора: пустая строка перестаёт быть
-// пустой, число «20.0344\r» читается неправильно, а записанный файл отличается
-// от windows-версии на байты окончаний строк — то есть перестаёт быть
-// совместимым.
-//
-// Вторая задача — имя файла. Файловая система Windows не различает регистр:
-// задание подключает `#include horns.h`, а на диске лежит `HORNS.H`. На ext4 и
-// на томе APFS, размеченном с учётом регистра, это разные имена, и файл,
-// созданный на Windows, не открывается.
-//
-// РЕШЕНИЕ. Открытие файлов перехватывается ПРЕПРОЦЕССОРОМ, а не компоновщиком:
-// преамбула win_src (compat/include/tmc_win_prelude.h) объявляет
-// `#define fopen tmc_fopen`, и весь код Windows-версии приходит сюда. Раньше
-// подмена делалась ключом `-Wl,--wrap=fopen`, но компоновщик Apple такого ключа
-// не понимает, а один способ на обе системы лучше двух.
-// Для ТЕКСТОВЫХ режимов (без 'b') возвращаем поток, который при чтении убирает
-// возврат каретки, а при записи ставит его перед каждым переводом строки.
-// ДВОИЧНЫЕ режимы идут в настоящий fopen без изменений — числовые форматы
-// (S-матрицы) остаются байт в байт теми же. Имя в обоих случаях разрешается
-// без учёта регистра.
-//
-// ПОТОК СО СВОИМИ ФУНКЦИЯМИ ОБМЕНА. В glibc такой поток создаёт `fopencookie`,
-// в libc Darwin этого вызова нет — там его BSD-предшественник `funopen`.
-// Отличаются только подписи (у funopen размеры и результат обмена — `int`,
-// смещение — `fpos_t`), поэтому для macOS написаны тонкие переходники, а сама
-// обработка блоков — textReadBlock/textWriteBlock — общая.
-//
-// ПРОИЗВОДИТЕЛЬНОСТЬ. Перевод строк делается БЛОКАМИ, а не посимвольно: счётные
-// ядра пишут выходной файл на каждом такте, и файлы бывают под мегабайт.
-// Посимвольная обработка (fgetc/fputc на каждый байт) замедляла счёт с двух
-// секунд до десяти минут. Дублировать обработку ради второй системы нельзя по
-// той же причине: расходиться будет не только скорость, но и поведение.
-//
-// Это слой совместимости, а не вычисления: меняется только трактовка окончаний
-// строк на границе ввода-вывода — ровно то, что делает библиотека C на Windows.
-//
-// ТРЕТЬЯ ЗАДАЧА (добавлено для приложения, решение M26, ISSUES П-10) — файл
-// мгновенного поля (.ex/.ey/.hz). Ядро переписывает его каждые полтакта (PutField:
-// fopen "wb", кадр, fclose) и держит открытым почти всё время, так что читатель
-// застаёт его недописанным. Поэтому кадр пишется во временный файл рядом
-// («<имя>.tmp~»), а при fclose заменяет собой файл поля переименованием — на одном
-// томе это атомарно: читатель (FieldRecorder, экран «Поле») в любой момент видит
-// цельный предыдущий или новый кадр, а ядро никого не ждёт. Байты кадра те же.
+/// @file tmc_textmode.cpp
+/// @brief Открытие файлов кодом расчёта: текстовый режим Windows, имена без учёта регистра, кадры поля.
+///
+/// Файлы заданий и текстовые результаты записаны с окончаниями CRLF, а Windows не различает
+/// регистр имён. Преамбула `tmc_win_prelude.h` подменяет `fopen` и `remove` на `tmc_fopen` и
+/// `tmc_remove`, и весь код расчёта приходит сюда: текстовые режимы получают поток с переводом
+/// окончаний строк блоками, двоичные идут в настоящий `fopen`. На Android поток создаёт `funopen`
+/// (в bionic нет `fopencookie`), на Linux — `fopencookie`.
+///
+/// Только в версии для Android: кадр мгновенного поля (`.ex`, `.ey`, `.hz`) пишется во временный
+/// файл и при закрытии заменяет файл поля переименованием. Экран «Поле» поэтому всегда читает
+/// цельный кадр, а ядро никого не ждёт.
+/// @see https://www.tamic.ru/docs/platforms/android.html#kernels
 
-#ifndef _WIN32
-
-// Преамбула win_src подменяет fopen макросом. Внутри ЭТОГО файла нужен
+// Преамбула win_src подменяет fopen макросом. Внутри этого файла нужен
 // настоящий fopen, иначе обёртка позвала бы сама себя. Снятие подмены стоит
 // до всех включений и работает в любом случае: даже если преамбулу подставят
 // ключом -include (он разворачивается перед первой строкой файла), макрос к
@@ -65,7 +21,7 @@
 #undef fopen
 #undef remove
 
-#if defined(__APPLE__) || defined(__ANDROID__)
+#if defined(__ANDROID__)
   #define TMC_TEXTMODE_FUNOPEN 1
 #endif
 
@@ -239,6 +195,11 @@ ssize_t textWriteBlock(void* cookie, const char* buf, size_t size)
             done += 1;                      // сам перевод строки уже записан
         }
     }
+    // Данные отдаём системе сразу: ядро держит .t открытым весь шаг и читает этот же файл другим
+    // потоком сразу после fflush. Лишних обращений к диску нет: функция вызывается, только когда
+    // заполнен буфер внешнего потока или по fflush/fclose.
+    if (std::fflush(ts->raw) != 0)
+        return -1;
     return static_cast<ssize_t>(size);
 }
 
@@ -279,7 +240,7 @@ int fieldClose(void* cookie)
 }
 
 #ifdef TMC_TEXTMODE_FUNOPEN
-int fieldWriteApple(void* cookie, const char* buf, int size)
+int fieldWriteFunopen(void* cookie, const char* buf, int size)
 {
     if (size <= 0)
         return 0;
@@ -296,7 +257,7 @@ FILE* openFieldForWrite(const char* path)
         return 0;
     }
 #ifdef TMC_TEXTMODE_FUNOPEN
-    FILE* f = ::funopen(fs, 0, fieldWriteApple, 0, fieldClose);
+    FILE* f = ::funopen(fs, 0, fieldWriteFunopen, 0, fieldClose);
 #else
     cookie_io_functions_t io = { 0, fieldWrite, 0, fieldClose };
     FILE* f = fopencookie(fs, "wb", io);
@@ -321,21 +282,21 @@ FILE* openFieldForWrite(const char* path)
 // Переходники под funopen. Отличия от glibc только в типах: размер и результат
 // обмена — int, смещение — fpos_t (в Darwin это знаковое 64-разрядное целое,
 // арифметика с ним обычная). Логика перевода строк здесь не повторяется.
-int textReadApple(void* cookie, char* buf, int size)
+int textReadFunopen(void* cookie, char* buf, int size)
 {
     if (size <= 0)
         return 0;
     return static_cast<int>(textReadBlock(cookie, buf, static_cast<size_t>(size)));
 }
 
-int textWriteApple(void* cookie, const char* buf, int size)
+int textWriteFunopen(void* cookie, const char* buf, int size)
 {
     if (size <= 0)
         return 0;
     return static_cast<int>(textWriteBlock(cookie, buf, static_cast<size_t>(size)));
 }
 
-fpos_t textSeekApple(void* cookie, fpos_t offset, int whence)
+fpos_t textSeekFunopen(void* cookie, fpos_t offset, int whence)
 {
     TextStream* ts = static_cast<TextStream*>(cookie);
     if (fseeko(ts->raw, static_cast<off_t>(offset), whence) != 0)
@@ -411,9 +372,9 @@ extern "C" FILE* tmc_fopen(const char* path, const char* mode)
     const bool wantWrite = (mode[0] != 'r') || plus;
 
     FILE* f = ::funopen(ts,
-                        wantRead  ? textReadApple  : 0,
-                        wantWrite ? textWriteApple : 0,
-                        textSeekApple,
+                        wantRead  ? textReadFunopen  : 0,
+                        wantWrite ? textWriteFunopen : 0,
+                        textSeekFunopen,
                         textCloseStream);
 #else
     cookie_io_functions_t io = { textReadBlock, textWriteBlock,
@@ -440,20 +401,3 @@ extern "C" int tmc_remove(const char* path)
     const std::string resolved = resolveIgnoringCase(path);
     return std::remove(resolved.empty() ? path : resolved.c_str());
 }
-
-// GetFileAttributes для кода расчёта (этап 1B, опись J): ядро спрашивает, прочитал ли
-// внешний FieldView файл поля (TmcRTHRectNode.cpp, IsFieldFileRead). Путь — в записи
-// Windows (П-2), поэтому имя разрешается так же, как в tmc_fopen. Ответ — как у только
-// что записанного файла в Windows: есть -> FILE_ATTRIBUTE_ARCHIVE (0x20), нет -> 0xFFFFFFFF.
-// SetFileAttributes атрибутов не хранит (FieldView — экран того же приложения, В-15),
-// поэтому ожидания чтения поля внешней программой вне Windows не бывает.
-extern "C" unsigned long tmc_get_file_attributes(const char* path)
-{
-    if (!path)
-        return 0xFFFFFFFFul;
-    const std::string resolved = resolveIgnoringCase(path);
-    struct stat st;
-    return (::stat(resolved.empty() ? path : resolved.c_str(), &st) == 0) ? 0x20ul : 0xFFFFFFFFul;
-}
-
-#endif // !_WIN32

@@ -1,3 +1,8 @@
+/// @file mesh3d.cpp
+/// @brief Реализация сетки 3D: габарит, склейка вершин по решётке, масштаб, объединение.
+///
+/// Описание — в mesh3d.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#mesh-import
 #include "mesh3d.h"
 
 #include <QHash>
@@ -36,11 +41,23 @@ Bounds3 Mesh::bounds() const
 
 namespace {
 
+/// @brief Ячейка решётки склейки: целые номера по x, y, z.
 struct Cell {
+    /// @name Номера ячейки
+    ///@{
+    /// Номера ячейки решётки по осям x, y, z.
     qint64 x, y, z;
+    ///@}
+    /// @brief Сравнивает ячейки.
+    /// @param[in] o  другая ячейка.
+    /// @return true — все три номера совпадают.
     bool operator==(const Cell &o) const { return x == o.x && y == o.y && z == o.z; }
 };
 
+/// @brief Хеш ячейки решётки для `QHash`.
+/// @param[in] c     ячейка.
+/// @param[in] seed  начальное значение хеша.
+/// @return Хеш.
 size_t qHash(const Cell &c, size_t seed = 0)
 {
     return ::qHash(c.x * 73856093LL ^ c.y * 19349663LL ^ c.z * 83492791LL, seed);
@@ -124,17 +141,5 @@ void Mesh::scale(double k)
     }
 }
 
-void Mesh::append(const Mesh &other)
-{
-    const int vBase = int(vertices.size());
-    const int tBase = int(tris.size());
-    vertices += other.vertices;
-    for (const auto &t : other.tris)
-        tris << std::array<int, 3>{t[0] + vBase, t[1] + vBase, t[2] + vBase};
-    for (MeshBody b : other.bodies) {
-        b.firstTri += tBase;
-        bodies << b;
-    }
-}
 
 } // namespace tpl

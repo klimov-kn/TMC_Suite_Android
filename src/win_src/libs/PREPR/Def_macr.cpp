@@ -18,53 +18,109 @@
 **  OVERLAY       : YES
 **
 */
+/// @file def_macr.cpp
+/// @brief Макросы `#define`: разбор определения, разрезание тела, подстановка в текст.
+///
+/// Часть модуля «Библиотека prepr». `def_main_macro()` находит все определения и
+/// раскрывает их от последнего к первому; для каждого `def_main_macdef()` разбирает
+/// заголовок (`def_separ_mac_name`), тело (`def_set_formal_param`), удаляет строку
+/// определения и подставляет макрос во все вызовы ниже неё (`def_subst_mac`).
+/// @see https://www.tamic.ru/docs/code/lib-prepr.html#define
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>   // BUG-004: realloc
 
-#include <Typedef.h>
-#include <Error1.h>
+#include <typedef.h>
+#include <error1.h>
 
-#include "Prepr1.h"
+#include "prepr1.h"
 
 
 
+/// Разделитель заголовка и тела макроса: `#define имя п1; п2; @тело`.
 #define  DEF_SEPARATOR '@'
 
 /* #define _DEBUG*/
 
+/// @brief Раскрывает один макрос, определение которого начинается после `buf->inp_p`.
+///
+/// Разбирает определение в общую структуру `s_pMacMain`, удаляет запись `#define` из
+/// текста и подставляет макрос во все вызовы ниже.
+/// @param[in,out] buf  буфер; `inp_p` — узел перед `#define`
+/// @return `BUF_NULL` — успех; отрицательный код ошибки разбора или подстановки.
+/// @warning Последний символ записи отбрасывается как перевод строки: определение в
+///          последней строке файла без перевода строки теряет последний символ тела.
 static int  def_main_macdef( BUFFER *buf );
+
+/// Общая рабочая структура макроса на время `def_main_macro()` (~10 МБ); `NULL` вне прохода.
+static MACROS *s_pMacMain = NULL;   // BUG-004: one MACROS buffer for all #define
+
+/// Текст ошибки препроцессора (определён в prep_mn.cpp).
+extern char *szError;               // Prep_mn.cpp: the text of the error
+
+/// @brief Пишет ошибку вида «`<текст> (macro <имя>)`», имя обрезается до 200 символов.
+/// @param[in] pszWhat  текст ошибки
+/// @param[in] pszName  имя макроса
+static void def_macro_message( const char *pszWhat, const char *pszName )   // S-21
+{
+  char szMsg[400];
+  snprintf( szMsg, sizeof(szMsg), "%s (macro %.200s)", pszWhat, pszName );
+  szMsg[sizeof(szMsg)-1] = '\0';
+  put_error_messege( szMsg );
+}
 
                 /*  substitute all macros*/
 int def_main_macro( BUFFER *buf )
  {
-  int p, p1, i_err;
-
-  p1 = buf->inp_p;
+  // BUG-004: without recursion and with one MACROS buffer (see the head of the file)
+  int  p1, i_err = BUF_NULL, nPos = 0, nMax = 0, k, pLast;
+  int *pnPos = NULL, *pnNew;
+                /*  the positions of all #define, as the recursion found them*/
+  for( p1 = def_macro( buf ); p1 >= 0; p1 = def_macro( buf ) )
+   {
+    if( nPos >= nMax )
+     {
+      nMax = nMax * 2 + 256;
+      if( (pnNew = (int *)realloc( pnPos, nMax * sizeof(int) )) == NULL )
+       {
+        free( pnPos );
+        put_error_messege( "preprocessor: not enough memory (list of #define)" );
+        return -1;
+        }
+      pnPos = pnNew;
+      }
+    pnPos[nPos++] = p1;
+    buf->inp_p = buf->ilex[p1];
+    }
                 /*  if not macro define return BUF_NULL*/
-  if( ( p1 =  def_macro( buf ) ) < 0 )  return( BUF_NULL );
+  if( nPos == 0 ) return( BUF_NULL );
+  pLast = buf->inp_p;
 
-  buf->inp_p = buf->ilex[p1];  /*  if there is macro define call def_main_macro*/
-  if( (i_err = def_main_macro( buf )) < 0) return( i_err);
+  if( (s_pMacMain = new MACROS[1] ) == NULL )
+   {
+    free( pnPos );
+    put_error_messege( "preprocessor: not enough memory (MACROS)" );
+    return -1;
+    }
+                   /*  substitute the macros from the last one*/
+  for( k = nPos - 1; k >= 0; k-- )
+   {
+    buf->inp_p = pnPos[k];
+    i_err = def_main_macdef( buf );
+    if( i_err < 0 ) break;
+    }
 
-  p = buf->inp_p;
-  buf->inp_p = p1;
-                   /*  substitute 1 macro*/
-  i_err = def_main_macdef( buf );
-
-  buf->inp_p = p;
+  delete []s_pMacMain;
+  s_pMacMain = NULL;
+  free( pnPos );
+  buf->inp_p = pLast;
   return( i_err );
-
   }
 
                    /*  substitute 1 macro define*/
 int  def_main_macdef( BUFFER *buf )
  {
-   MACROS *mac;
-   
-   if( (mac = new MACROS[1] ) == NULL )
-   {
-	   return -1;
-   };
+   MACROS *mac = s_pMacMain;   // BUG-004: it was new MACROS (~10 MB) for every #define
 
    int p1, i, n1;
 
@@ -75,15 +131,17 @@ int  def_main_macdef( BUFFER *buf )
    p1 = buf->inp_p;
    if( buf_gets( mac->mac, BUF_STR_N_MAX, buf) != BUF_NULL ) 
    {
-	   delete []mac;
+	   ;   // BUG-004: MACROS is freed in def_main_macro
 	   return -1;
    };
    n1 = strlen( mac->mac );
-   mac->mac[n1-1] = '\0';
+   // I-09: only the end of line is cut (old: mac->mac[n1-1] = '\0'; - the last character of a #define in the
+   // last line of the file without the end of line was lost)
+   if( ( n1 > 0 )&&( mac->mac[n1-1] == '\n' ) ) mac->mac[n1-1] = '\0';
 
    if( (i = def_separ_mac_name( buf, mac)) < 0 ) 
    {
-	   delete []mac;
+	   ;   // BUG-004: MACROS is freed in def_main_macro
 	   return( i );
    };
 
@@ -93,7 +151,7 @@ int  def_main_macdef( BUFFER *buf )
 */
     if( def_set_formal_param( buf, mac, i) < 0 ) 
 	{
-		delete []mac;
+		;   // BUG-004: MACROS is freed in def_main_macro
 		return( BUF_ERROR_NO_FORMAL_PARAM );
 	};
 
@@ -109,7 +167,7 @@ int  def_main_macdef( BUFFER *buf )
 *****      substitute macros in buffer        ******
 */
 	i = def_subst_mac( buf, mac);
-	delete []mac;
+	;   // BUG-004: MACROS is freed in def_main_macro
 	return( i );
  }
 
@@ -128,6 +186,9 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
   int p1, n1, j, i_err;
 
 
+  // Просмотр текста по лексемам. Найден вызов: читаются фактические параметры, вызов
+  // удаляется, на его место пишутся фрагменты тела вперемежку со значениями параметров;
+  // просмотр продолжается с начала подставленного текста (вложенные вызовы раскрываются).
   while( buf->inp_p >= 0)
    {
     p1 = buf->inp_p;
@@ -144,6 +205,7 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
        {
 	if( (i_err = def_buf_gets_param( buf, mac1+n1)) != BUF_NULL )
 	{
+		def_macro_message( szError, mac->m[ 0 ] );   // S-21
 		delete []mac1;
 		return( i_err);
 	};
@@ -152,7 +214,7 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
 	n1 += (strlen( mac1+n1) + 1);
         if( *mac->m[j+1] == '\n')
          {
-          put_error_messege( "Fact parameter's" );
+          def_macro_message( "Fact parameters: a parameter or ';' is missing", mac->m[ 0 ] );   // S-21
 		  delete []mac1;
           return( BUF_ERROR_FACT_PARAM);
           }
@@ -167,11 +229,13 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
 	if( mac->im1[j] >= 0 )
 	 if( buf_puts2( mac->m[mac->im1[j]], buf) != BUF_NULL ) 
 	 {
+		 def_macro_message( szError, mac->m[ 0 ] );   // S-21
 		 delete []mac1;
 		 return -1;
 	 };
         if( buf_puts2( mac->m1[j], buf) != BUF_NULL )
 		 {
+			 def_macro_message( szError, mac->m[ 0 ] );   // S-21
 			 delete []mac1;
 			 return -1;
 		 };
@@ -180,7 +244,7 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
         if( buf->inp_p < 0 )
          {
 		  delete []mac1;
-          put_error_messege( "Small buffer" );
+          def_macro_message( "Small buffer (is the macro recursive?)", mac->m[ 0 ] );   // S-21
           return(BUF_EOF );
           }
 	};
@@ -191,9 +255,9 @@ int  def_subst_mac( BUFFER *buf, MACROS *mac)
  return( BUF_NULL);
  }
                      /*  set formal parameters in struct. macros*/
-int  def_set_formal_param( BUFFER * /*buf*/, MACROS *mac, int i)
+int  def_set_formal_param( BUFFER *buf, MACROS *mac, int i)
  {
-  int i3, j, n;
+  int i3, j, n, i1;
   char *ch;
   char  *mac1;
 
@@ -202,6 +266,8 @@ int  def_set_formal_param( BUFFER * /*buf*/, MACROS *mac, int i)
 	  return -1;
   };
 
+  // Первая лексема тела (сразу после '@') обрабатывается отдельно: если это формальный
+  // параметр, он вырезается и фрагмент 0 получает его номер.
   i++;
   mac->i2 = 0;
   i3 = i;
@@ -249,7 +315,9 @@ int  def_set_formal_param( BUFFER * /*buf*/, MACROS *mac, int i)
     };
 
 
-  for( mac->i2 = 1; mac->mac[ i ] != '\0'; )
+  // Остальные лексемы: на месте найденного формального параметра ставится '\0' (конец
+  // предыдущего фрагмента), имя параметра вырезается, следующий фрагмент получает его номер.
+  for( i1 = i, mac->i2 = 1; mac->mac[ i ] != '\0'; )
    {
     i3 = i;
     ch = mac->mac + i;
@@ -311,6 +379,9 @@ int  def_separ_mac_name( BUFFER *buf, MACROS *mac)
   ib = 4;
   mac->m[ 0 ] = mac->mac;
 
+  // Автомат по символам после "#define " (с позиции 8); имя и параметры сдвигаются
+  // к началу mac->mac без пробелов. Состояния ib: 4 — пробелы до имени, 0 — имя,
+  // 1 — пробелы до параметра, 2 — имя параметра, 3 — пробелы после имени параметра.
   for( i = 8; mac->mac[ i ] != DEF_SEPARATOR; i++)
    {
 

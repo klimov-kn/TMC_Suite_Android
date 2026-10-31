@@ -15,21 +15,11 @@
 **
 */
 
-#include <Typedef.h>
-#include <Error1.h>
+/// @file get_err.cpp
+/// @brief Перевод кода ошибки вычислителя в номер сообщения пакета: `get_expr_err`.
+/// @see https://www.tamic.ru/docs/code/lib-expr.html#errors
+#include <typedef.h>
+#include <error1.h>
 
-#include <EXPR.H>
+#include <expr.h>
 
-int   get_expr_err( char  * /*lpszExpr*/ )
- {
-  int nTmp = -expr_get_error_cod();
-
-  switch( nTmp )
-   {
-    case 0: return 0;
-    default:if( nTmp > 20 ) nTmp = 21;
-            nTmp += 2400;
- //           put_error_messege( nTmp, lpszExpr );
-            return -nTmp;
-    }
-  }

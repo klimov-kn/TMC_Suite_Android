@@ -1,3 +1,8 @@
+/// @file meshgen.cpp
+/// @brief Реализация генератора тестовых тел и их записи в STL/OBJ/MTL.
+///
+/// Описание — в meshgen.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#mesh-import
 #include "meshgen.h"
 
 #include <QPointF>
@@ -10,8 +15,14 @@ namespace tpl::meshgen {
 
 namespace {
 
+/// Число pi.
 constexpr double kPi = 3.14159265358979323846;
 
+/// @brief Собирает сетку из одного тела.
+/// @param[in] name  имя и материал тела.
+/// @param[in] v     вершины.
+/// @param[in] t     треугольники.
+/// @return Сетка.
 Mesh single(const QString &name, const QVector<Vec3> &v, const QVector<std::array<int, 3>> &t)
 {
     Mesh m;
@@ -25,6 +36,12 @@ Mesh single(const QString &name, const QVector<Vec3> &v, const QVector<std::arra
     return m;
 }
 
+/// @brief Добавляет четырёхугольник a-b-c-d двумя треугольниками.
+/// @param[in,out] t  список треугольников.
+/// @param[in]     a  номер вершины 1.
+/// @param[in]     b  номер вершины 2.
+/// @param[in]     c  номер вершины 3.
+/// @param[in]     d  номер вершины 4.
 void quad(QVector<std::array<int, 3>> *t, int a, int b, int c, int d)
 {
     *t << std::array<int, 3>{a, b, c} << std::array<int, 3>{a, c, d};

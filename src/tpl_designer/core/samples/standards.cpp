@@ -1,5 +1,12 @@
+/// @file standards.cpp
+/// @brief Таблицы сечений волноводов (EIA/IEC, ГОСТ 20900-75) и подложек для образцов.
+///
+/// Часть модуля «Ядро TPL Designer», каталог образцов. Описание открытых функций —
+/// в `standards.h`.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#samples
 #include "standards.h"
 
+#include "lang.h"
 #include "physics.h"
 
 #include <cmath>
@@ -13,16 +20,23 @@ double WaveguideStd::fc10() const
 
 QString WaveguideStd::label() const
 {
-    return QStringLiteral("%1 — %2x%3 мм, %4-%5 ГГц%6")
+    return tpl::tr("%1 — %2x%3 мм, %4-%5 ГГц%6", "%1 - %2x%3 mm, %4-%5 GHz%6")
         .arg(name, QString::number(a, 'g', 5), QString::number(b, 'g', 5),
              QString::number(fLo, 'g', 4), QString::number(fHi, 'g', 4),
-             bandFromStandard ? QString() : QStringLiteral(" (расч.)"));
+             bandFromStandard ? QString() : tpl::tr(" (расч.)", " (calc.)"));
 }
 
 namespace {
 
 /// Международная серия: EIA RS-261 (WR) и её аналог IEC 60153-2 (R). Размеры и рабочие
 /// диапазоны — из стандарта.
+/// @param[in] wr  обозначение EIA («WR-90»)
+/// @param[in] r   обозначение IEC («R100»)
+/// @param[in] a   широкая стенка, мм
+/// @param[in] b   узкая стенка, мм
+/// @param[in] lo  нижняя граница рабочего диапазона, ГГц
+/// @param[in] hi  верхняя граница рабочего диапазона, ГГц
+/// @return Строка таблицы с `bandFromStandard` = true.
 WaveguideStd eia(const char *wr, const char *r, double a, double b, double lo, double hi)
 {
     WaveguideStd w;
@@ -40,12 +54,15 @@ WaveguideStd eia(const char *wr, const char *r, double a, double b, double lo, d
 /// прямоугольные». Стандарт задаёт только внутреннее сечение; рабочий диапазон считаем
 /// по обычному правилу (1.25...1.9)*fc10: ниже — велики потери и дисперсия у отсечки,
 /// выше — рядом отсечка H20. Поэтому он и помечен «расч.».
+/// @param[in] a  широкая стенка, мм
+/// @param[in] b  узкая стенка, мм
+/// @return Строка таблицы с расчётным диапазоном (округлён до 0.01 ГГц).
 WaveguideStd gost(double a, double b)
 {
     WaveguideStd w;
-    w.name = QStringLiteral("ГОСТ %1x%2").arg(QString::number(a, 'g', 4),
-                                              QString::number(b, 'g', 4));
-    w.family = QStringLiteral("ГОСТ 20900-75");
+    w.name = tpl::tr("ГОСТ %1x%2", "GOST %1x%2").arg(QString::number(a, 'g', 4),
+                                                     QString::number(b, 'g', 4));
+    w.family = tpl::tr("ГОСТ 20900-75", "GOST 20900-75");
     w.a = a;
     w.b = b;
     const double fc = kLightSpeed / (2.0 * a);
@@ -56,11 +73,11 @@ WaveguideStd gost(double a, double b)
     return w;
 }
 
-} // namespace
-
-const QVector<WaveguideStd> &waveguides()
+/// @brief Строит таблицу сечений на текущем языке: 22 сечения EIA/IEC и 24 ГОСТ.
+/// @return Таблица сечений.
+QVector<WaveguideStd> makeWaveguides()
 {
-    static const QVector<WaveguideStd> table = [] {
+    return [] {
         QVector<WaveguideStd> t;
         t << eia("WR-650", "R14", 165.10, 82.55, 1.12, 1.70)
           << eia("WR-510", "R18", 129.54, 64.77, 1.45, 2.20)
@@ -95,7 +112,21 @@ const QVector<WaveguideStd> &waveguides()
             t << gost(s[0], s[1]);
         return t;
     }();
-    return table;
+}
+
+} // namespace
+
+// Имена ГОСТ-сечений зависят от языка (lang.h): таблица своя на каждый язык, чтобы
+// переключение не «замораживало» надписи. Порядок и числа в обеих одинаковые —
+// номер строки остаётся значением параметра образца.
+const QVector<WaveguideStd> &waveguides()
+{
+    if (tpl::english()) {
+        static const QVector<WaveguideStd> en = makeWaveguides();
+        return en;
+    }
+    static const QVector<WaveguideStd> ru = makeWaveguides();
+    return ru;
 }
 
 QStringList waveguideChoices()
@@ -145,30 +176,46 @@ int waveguideForFreq(double fGHz)
     return fallback >= 0 ? fallback : defaultWaveguide();
 }
 
-const QVector<Substrate> &substrates()
+namespace {
+
+/// @brief Строит таблицу подложек на текущем языке.
+/// @return Таблица подложек (eps, стандартная толщина в мм, источник числа).
+QVector<Substrate> makeSubstrates()
 {
     // Справочные значения производителей и отраслевых ТУ. Проницаемость — на частотах
     // единиц гигагерц; толщина — самая ходовая из стандартного ряда.
-    static const QVector<Substrate> table = {
-        {QStringLiteral("FR-4"), 4.4, 1.5, QStringLiteral("стеклотекстолит, eps 4.3-4.7")},
-        {QStringLiteral("Rogers RO4003C"), 3.38, 0.508, QStringLiteral("данные Rogers Corp.")},
-        {QStringLiteral("Rogers RO4350B"), 3.48, 0.762, QStringLiteral("данные Rogers Corp.")},
-        {QStringLiteral("Rogers RT/duroid 5880"), 2.20, 0.787, QStringLiteral("данные Rogers Corp.")},
-        {QStringLiteral("ФАФ-4Д"), 2.5, 1.0, QStringLiteral("фольгированный фторопласт")},
-        {QStringLiteral("ФЛАН-2.8"), 2.8, 1.0, QStringLiteral("фольгированный армированный")},
-        {QStringLiteral("ФЛАН-5"), 5.0, 1.0, QStringLiteral("фольгированный армированный")},
-        {QStringLiteral("ФЛАН-10"), 10.0, 1.0, QStringLiteral("фольгированный армированный")},
-        {QStringLiteral("Поликор (Al2O3)"), 9.8, 1.0, QStringLiteral("керамика ВК-100")},
+    return {
+        {QStringLiteral("FR-4"), 4.4, 1.5, tpl::tr("стеклотекстолит, eps 4.3-4.7", "glass-epoxy laminate, eps 4.3-4.7")},
+        {QStringLiteral("Rogers RO4003C"), 3.38, 0.508, tpl::tr("данные Rogers Corp.", "Rogers Corp. data")},
+        {QStringLiteral("Rogers RO4350B"), 3.48, 0.762, tpl::tr("данные Rogers Corp.", "Rogers Corp. data")},
+        {QStringLiteral("Rogers RT/duroid 5880"), 2.20, 0.787, tpl::tr("данные Rogers Corp.", "Rogers Corp. data")},
+        {tpl::tr("ФАФ-4Д", "FAF-4D"), 2.5, 1.0, tpl::tr("фольгированный фторопласт", "foil-clad PTFE")},
+        {tpl::tr("ФЛАН-2.8", "FLAN-2.8"), 2.8, 1.0, tpl::tr("фольгированный армированный", "foil-clad reinforced")},
+        {tpl::tr("ФЛАН-5", "FLAN-5"), 5.0, 1.0, tpl::tr("фольгированный армированный", "foil-clad reinforced")},
+        {tpl::tr("ФЛАН-10", "FLAN-10"), 10.0, 1.0, tpl::tr("фольгированный армированный", "foil-clad reinforced")},
+        {tpl::tr("Поликор (Al2O3)", "Polikor (Al2O3)"), 9.8, 1.0, tpl::tr("керамика ВК-100", "VK-100 ceramic")},
     };
-    return table;
+}
+
+} // namespace
+
+// Названия и пояснения зависят от языка — таблица своя на каждый язык (см. waveguides()).
+const QVector<Substrate> &substrates()
+{
+    if (tpl::english()) {
+        static const QVector<Substrate> en = makeSubstrates();
+        return en;
+    }
+    static const QVector<Substrate> ru = makeSubstrates();
+    return ru;
 }
 
 QStringList substrateChoices()
 {
     QStringList out;
     for (const Substrate &s : substrates())
-        out << QStringLiteral("%1 — eps %2, h %3 мм").arg(s.name, QString::number(s.eps),
-                                                          QString::number(s.h));
+        out << tpl::tr("%1 — eps %2, h %3 мм", "%1 - eps %2, h %3 mm")
+                   .arg(s.name, QString::number(s.eps), QString::number(s.h));
     return out;
 }
 

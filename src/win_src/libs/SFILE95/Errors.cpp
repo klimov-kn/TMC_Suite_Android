@@ -8,27 +8,24 @@
  *  OVERLAY: NO
 */
 
+/// @file errors.cpp
+/// @brief Заглушка `put_error_messege(int, ...)` и тексты сообщений об ошибках S-файлов.
+///
+/// Часть модуля «Библиотека sfile95». Тело функции закомментировано: в сборке
+/// этой версии сообщения не выводятся, функция всегда возвращает 0. Об ошибках
+/// вызывающий узнаёт только по кодам возврата.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#pitfalls
+
 
 #include <stdio.h>
 #include <stdarg.h>
 
-#include <Typedef.h>
-#include <Error1.h>
-#include "ERROR2.H"
+#include <typedef.h>
+#include <error1.h>
 
 
-char msg1[] = "Fatal ERROR.\nNot enough memory to run program.\nRemove resident programs and restart system. ";
-char msg2[] = "Error !\nCan not open listing output file:\n%s!";
-char msg3[] = "Warning !\nNot enough memory for all frequency points!\nOnly %d frequencies processed!";
-char msg4[] = "Error !\nCan't open S-matrix data file\n%s!";
-char msg5[] = "Error while reading from S-file:\n%s!";
-char msg6[] = "Error !\nThis is not scattering matrix file:\n%s!";
-char msg7[] = "Error !\nToo old scattering matrix file:\n%s!";
-char msg8[] = "Error !\nDifferent number of inputs! See listing.";
-char msg9[] = "Error !\nDifferent number of modes! See listing.";
-char msg10[] = "Error !\nCan't open file for text table\n%s!";
 
-int  put_error_messege( int /*err_num*/, ... )
+int  put_error_messege( int err_num, ... )
   {
-return 0;
+   return 0;
   }

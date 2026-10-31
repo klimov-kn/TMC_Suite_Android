@@ -15,6 +15,8 @@
 // вида оси (rebuild) — в главном.
 #pragma once
 
+#include "touchgesture.h"
+
 #include <QPointF>
 #include <QQuickPaintedItem>
 #include <QRectF>
@@ -143,6 +145,10 @@ signals:
     void viewChanged();
 
 protected:
+    void touchEvent(QTouchEvent *e) override;
+    void touchUngrabEvent() override;
+
+protected:
     // Функция чтения (без обращения к объекту: выполняется в рабочем потоке).
     virtual Loader loader() const = 0;
     // Подписи видов оси (setModes) на текущем языке; вызывается и при смене языка.
@@ -188,6 +194,7 @@ private:
     void drawPick(QPainter *p, const QRectF &plot, const QRectF &view) const;
     void drawLegend(QPainter *p, const QRectF &area) const;
 
+    TouchGesture m_touch;          // касания (щипок без скачка)
     QString m_folder, m_file;
     QStringList m_files;
     QVariantList m_compare;

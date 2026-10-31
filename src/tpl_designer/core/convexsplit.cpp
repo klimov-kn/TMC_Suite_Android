@@ -1,3 +1,8 @@
+/// @file convexsplit.cpp
+/// @brief Реализация разбиения области на выпуклые куски методом вертикальных полос.
+///
+/// Описание — в convexsplit.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#geometry
 #include "convexsplit.h"
 
 #include <algorithm>
@@ -42,8 +47,16 @@ QVector<QPointF> padTriangle(const QVector<QPointF> &p)
 
 namespace {
 
+/// @brief Невертикальное ребро контура с упорядоченными по x концами.
 struct Edge {
+    /// @name Концы ребра
+    ///@{
+    /// Левый (`a`) и правый (`b`) концы ребра.
     QPointF a, b; // a.x < b.x
+    ///@}
+    /// @brief Вычисляет ординату ребра на абсциссе.
+    /// @param[in] x  абсцисса внутри [a.x; b.x].
+    /// @return Ордината точки ребра.
     double yAt(double x) const
     {
         const double t = (x - a.x()) / (b.x() - a.x());
@@ -53,10 +66,20 @@ struct Edge {
 
 /// Выпуклый кусок, растущий слева направо: нижняя и верхняя цепочки (x растёт).
 struct Piece {
+    /// @name Цепочки куска
+    ///@{
+    /// Нижняя и верхняя цепочки вершин куска (x растёт).
     QVector<QPointF> lower, upper;
+    ///@}
+    /// @return Абсцисса правого края куска.
     double rightX() const { return lower.last().x(); }
 };
 
+/// @brief Вычисляет векторное произведение (a - o) x (b - o).
+/// @param[in] o  общая точка.
+/// @param[in] a  конец первого вектора.
+/// @param[in] b  конец второго вектора.
+/// @return Положительно — поворот влево, отрицательно — вправо.
 double cross(const QPointF &o, const QPointF &a, const QPointF &b)
 {
     return (a.x() - o.x()) * (b.y() - o.y()) - (a.y() - o.y()) * (b.x() - o.x());
@@ -65,6 +88,11 @@ double cross(const QPointF &o, const QPointF &a, const QPointF &b)
 /// Добавить точку в цепочку. Нижняя цепочка выпуклого куска поворачивает только
 /// влево (cross >= 0), верхняя — только вправо. Точка на продолжении прямой заменяет
 /// предыдущую: лишняя вершина ядру не нужна. false — выпуклость нарушилась бы.
+/// @param[in,out] chain  цепочка вершин.
+/// @param[in]     p      новая точка.
+/// @param[in]     lower  true — нижняя цепочка, false — верхняя.
+/// @param[in]     eps    допуск коллинеарности.
+/// @return true — точка добавлена.
 bool extend(QVector<QPointF> *chain, const QPointF &p, bool lower, double eps)
 {
     if (chain->size() >= 2) {
@@ -82,6 +110,7 @@ bool extend(QVector<QPointF> *chain, const QPointF &p, bool lower, double eps)
 
 QVector<QVector<QPointF>> convexPieces(const QVector<QVector<QPointF>> &loops)
 {
+    // Шаг 1: невертикальные рёбра всех контуров и абсциссы всех вершин (границы полос).
     QVector<Edge> edges;
     QVector<double> xs;
     double span = 0.0;
@@ -120,6 +149,9 @@ QVector<QVector<QPointF>> convexPieces(const QVector<QVector<QPointF>> &loops)
             out << clean;
     };
 
+    // Шаг 2: в каждой полосе пары рёбер (снизу вверх, по чётно-нечётному правилу) дают
+    // трапеции; трапеция сливается с куском слева, если край совпадает и выпуклость
+    // сохраняется, иначе кусок слева закрывается и начинается новый.
     for (int s = 0; s + 1 < xs.size(); ++s) {
         const double x0 = xs.at(s), x1 = xs.at(s + 1);
         if (x1 - x0 <= eps)

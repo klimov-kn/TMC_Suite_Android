@@ -1,3 +1,8 @@
+/// @file expr.cpp
+/// @brief Реализация вычислителя выражений `.tpl`: рекурсивный спуск в дерево и обход дерева.
+///
+/// Описание интерфейса — в expr.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#expr
 #include "expr.h"
 
 #include <QStringList>
@@ -8,11 +13,15 @@
 namespace tpl {
 namespace {
 
+/// Число pi.
 constexpr double kPi = 3.14159265358979323846;
 
 /// Пробелы ядро сносит ИЗ ВЫРАЖЕНИЯ целиком (`expr_del_Blanks2` в
 /// TmcRTH_BolckList.cpp зовётся для каждого параметра), поэтому в авторских
 /// заданиях законно встречается `( + 500 . 0 )` и `6 . 3` — это числа 500.0 и 6.3.
+/// @brief Удаляет из текста все пробельные символы.
+/// @param[in] text  текст выражения.
+/// @return Текст без пробелов.
 QString stripSpaces(const QString &text)
 {
     QString clean;
@@ -134,6 +143,9 @@ enum Fn {
     FnSinh, FnCosh, FnTanh, FnAsin, FnAcos, FnAtan, FnNone
 };
 
+/// @brief Возвращает номер встроенной функции по имени.
+/// @param[in] name  имя функции (регистр значим).
+/// @return Код `Fn...` или `FnNone`, если функции нет.
 int functionCode(const QString &name)
 {
     if (name == QLatin1String("abs"))   return FnAbs;
@@ -159,15 +171,41 @@ int functionCode(const QString &name)
 /// `m_bad`: разбор файла задания обязан пережить любое непонятное выражение.
 struct ExprCompiler
 {
+    /// @brief Создаёт разборщик строки.
+    /// @param[in]  s      текст без пробелов (должен жить дольше разборщика).
+    /// @param[out] nodes  куда добавлять узлы дерева.
+    /// @param[out] names  куда добавлять имена переменных.
     ExprCompiler(const QString &s, QVector<ExprProgram::Node> *nodes, QStringList *names)
         : m_s(s), m_nodes(nodes), m_names(names) {}
 
+    // Предел глубины. Вычисление (`run`) и разбор скобок рекурсивны, и выражение
+    // из многих тысяч операций (`X_MIN (1+1+…+1);` из 200 000 слагаемых) роняло
+    // программу переполнением стека прямо при открытии файла (Т-31, BUG-025).
+    // Теперь такое выражение — просто «непонятное». Ядро всё равно не принимает
+    // тело блока длиннее 20 000 символов; настоящие формулы на порядки мельче.
+    static constexpr int kMaxTreeDepth = 4000;   ///< глубина дерева (рекурсия run)
+    static constexpr int kMaxNesting = 1000;     ///< вложенность разбора (скобки, знаки, ^)
+
+    /// @brief Добавляет узел и следит за глубиной дерева.
+    /// @param[in] n  узел.
+    /// @return Индекс узла; при превышении `kMaxTreeDepth` взводит `m_bad`.
     int add(ExprProgram::Node n)
     {
+        int d = 1;
+        if (n.a >= 0 && n.a < m_depth.size())
+            d = qMax(d, m_depth.at(n.a) + 1);
+        if (n.b >= 0 && n.b < m_depth.size())
+            d = qMax(d, m_depth.at(n.b) + 1);
+        if (d > kMaxTreeDepth)
+            m_bad = true;
         m_nodes->append(n);
+        m_depth.append(d);
         return int(m_nodes->size()) - 1;
     }
 
+    /// @brief Пропускает символ, если он стоит в текущей позиции.
+    /// @param[in] c  ожидаемый символ.
+    /// @return true — символ был и пропущен.
     bool eat(QChar c)
     {
         if (m_pos < m_s.size() && m_s.at(m_pos) == c) {
@@ -177,6 +215,8 @@ struct ExprCompiler
         return false;
     }
 
+    /// @brief Разбирает сумму/разность: product {(+|-) product}.
+    /// @return Индекс узла или -1 при ошибке.
     int sum()
     {
         int v = product();
@@ -192,6 +232,8 @@ struct ExprCompiler
         }
     }
 
+    /// @brief Разбирает произведение/частное: unary {(*|/) unary}.
+    /// @return Индекс узла или -1 при ошибке.
     int product()
     {
         int v = unary();
@@ -207,15 +249,30 @@ struct ExprCompiler
         }
     }
 
+    /// @brief Разбирает унарные знаки и степень; ограничивает вложенность `kMaxNesting`.
+    /// @return Индекс узла или -1 при ошибке.
     int unary()
     {
+        // Каждый виток рекурсивного спуска (скобки, функции, знаки, степени)
+        // проходит здесь — тут и ограничиваем его глубину.
+        if (m_bad || m_level >= kMaxNesting) {
+            m_bad = true;
+            return -1;
+        }
+        ++m_level;
+        int v;
         if (eat(QLatin1Char('-')))
-            return add({OpNeg, unary(), -1, -1, 0.0});
-        if (eat(QLatin1Char('+')))
-            return unary();
-        return power();
+            v = add({OpNeg, unary(), -1, -1, 0.0});
+        else if (eat(QLatin1Char('+')))
+            v = unary();
+        else
+            v = power();
+        --m_level;
+        return v;
     }
 
+    /// @brief Разбирает степень atom [^ unary] (правоассоциативно через unary).
+    /// @return Индекс узла или -1 при ошибке.
     int power()
     {
         const int base = atom();
@@ -226,6 +283,8 @@ struct ExprCompiler
         return base;
     }
 
+    /// @brief Разбирает скобки, число или имя/вызов функции.
+    /// @return Индекс узла или -1 при ошибке.
     int atom()
     {
         if (m_pos >= m_s.size()) {
@@ -249,6 +308,8 @@ struct ExprCompiler
         return -1;
     }
 
+    /// @brief Разбирает число, в том числе с показателем (3.1e+17).
+    /// @return Индекс узла-константы или -1 при ошибке.
     int number()
     {
         const int start = m_pos;
@@ -277,6 +338,8 @@ struct ExprCompiler
         return add({OpConst, -1, -1, -1, v});
     }
 
+    /// @brief Разбирает имя: переменную (без скобок) или вызов встроенной функции.
+    /// @return Индекс узла или -1 (неизвестная функция, нет закрывающей скобки).
     int call()
     {
         const int start = m_pos;
@@ -306,10 +369,17 @@ struct ExprCompiler
         return add({OpFunc, a, -1, fn, 0.0});
     }
 
+    /// Разбираемый текст.
     const QString &m_s;
+    /// Узлы строящегося дерева.
     QVector<ExprProgram::Node> *m_nodes;
+    /// Имена переменных строящейся программы.
     QStringList *m_names;
+    QVector<int> m_depth;   ///< глубина поддерева каждого узла (как m_nodes)
+    /// Текущая позиция в тексте.
     int m_pos = 0;
+    int m_level = 0;        ///< текущая вложенность разбора
+    /// Ошибка разбора.
     bool m_bad = false;
 };
 

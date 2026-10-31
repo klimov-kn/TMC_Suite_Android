@@ -123,7 +123,7 @@ qt_add_shaders(tamic_fieldview "tamic_fieldview_shaders"
         shaders/color.vert
         shaders/color.frag
 )
-target_include_directories(tamic_fieldview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rhi)
+target_include_directories(tamic_fieldview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rhi ${CMAKE_CURRENT_SOURCE_DIR}/../ui)
 target_link_libraries(tamic_fieldview PUBLIC
     tamic_fieldview_core tamic_tpl_theme
     # QRhi (rhi/qrhi.h) в Qt 6.11 — среди закрытых заголовков QtGui.

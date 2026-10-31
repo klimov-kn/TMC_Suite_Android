@@ -53,9 +53,11 @@ option(TAMIC_TPL_DESIGNER_DEMO  "Собрать tpl_designer_demo (только 
 # Перенесено из TPL_Designer/src/core без изменений логики.
 # STEP через OpenCASCADE на телефоне не нужен — stepio_none.cpp (STL и OBJ читаются).
 add_library(tamic_tpl_core STATIC
+    core/lang.cpp
     core/cp1251.cpp
     core/project.cpp
     core/emitter.cpp
+    core/placement.cpp
     core/expr.cpp
     core/epsfile.cpp
     core/sigfile.cpp
@@ -148,8 +150,6 @@ qt_add_qml_module(tamic_tpl_designer
     SOURCES
         backend/designermodel.h backend/designermodel.cpp
         backend/geometrycanvas.h backend/geometrycanvas.cpp
-        # Названия образцов для перевода (M28).
-        backend/sampletexts.cpp
     IMPORTS TamicTplTheme
     QML_FILES
         qml/TplDesignerPage.qml

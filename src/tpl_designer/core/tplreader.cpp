@@ -1,10 +1,23 @@
+/// @file tplreader.cpp
+/// @brief Чтение готового `.tpl` обратно в модель: препроцессор по правилам ядра,
+///        разбор секций шагов и сборка `Project`.
+///
+/// Часть ядра редактора заданий. Три слоя: препроцессор (`!`, `\\`, `#include`,
+/// `#define`) повторяет библиотеку PREPR ядра; разбор плоского текста делит его на
+/// шаги и блоки (`RawStep`, `RawBlock`); сборка модели склеивает блоки в фигуры и
+/// порты, восстанавливает варианты, очередь возбуждений, частоты, угловой свип, сигнал
+/// из файла и имена фигур из комментариев. Чтение «мягкое»: что модель не выражает,
+/// попадает в предупреждения с номером строки исходного файла.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#reader
 #include "tplreader.h"
+#include "lang.h"
 
 #include "sigfile.h"
 
 #include "cp1251.h"
 #include "emitter.h"
 #include "expr.h"
+#include "placement.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -30,6 +43,8 @@ namespace {
 
 /// Символ имени макроса. ⚠️ Именно ASCII-диапазоны, как в `def_gets`:
 /// QChar::isLetterOrNumber() принял бы кириллицу и разъехался бы с ядром.
+/// @param[in] c  символ
+/// @return true — латинская буква, цифра или `_`.
 bool isIdentChar(QChar c)
 {
     const ushort u = c.unicode();
@@ -45,6 +60,8 @@ using Records = QStringList;
 ///
 /// ⚠️ Порядок важен: комментарии режутся ДО склейки по `\\`, поэтому '!' перед
 /// `\\` убивает перенос строки. Ядро ведёт себя именно так.
+/// @param[in] line  одна строка исходного текста (с `\n` или без)
+/// @return Строка без комментария, всегда оканчивающаяся `\n`.
 QString deleteComment(QString line)
 {
     const int i = line.indexOf(QLatin1Char('!'));
@@ -55,6 +72,9 @@ QString deleteComment(QString line)
     return line;
 }
 
+/// @brief Делит текст на записи по строкам и сразу вырезает комментарии `!`.
+/// @param[in] text  исходный текст задания
+/// @return Записи буфера, по одной на строку исходного файла.
 Records loadRecords(const QString &text)
 {
     Records recs;
@@ -75,6 +95,7 @@ Records loadRecords(const QString &text)
 /// а строка склеивается со следующей через " \n".
 ///
 /// ⚠️ Ровно ДВА бэкслеша. С одним ядро макрос не соберёт — тело вывалится текстом.
+/// @param[in,out] recs  записи буфера; склеенные записи удаляются из списка
 void joinBackslash(Records *recs)
 {
     for (int i = 0; i < recs->size(); ++i) {
@@ -94,6 +115,10 @@ void joinBackslash(Records *recs)
 
 /// Позиция директивы `#define` / `#include` в записи. Ядро сравнивает 8 (9)
 /// символов вместе с разделителем, поэтому `#defineX` директивой не считается.
+/// @param[in] rec   запись буфера
+/// @param[in] name  директива (`#define` или `#include`)
+/// @param[in] last  true — искать последнее вхождение, false — первое
+/// @return Позиция директивы, за которой стоит пробел или табуляция; -1 — нет.
 int findDirective(const QString &rec, QLatin1String name, bool last = false)
 {
     int found = -1;
@@ -113,28 +138,39 @@ int findDirective(const QString &rec, QLatin1String name, bool last = false)
     }
 }
 
+/// @brief Возвращает первую строку текста без крайних пробелов (для сообщений).
+/// @param[in] s  текст
+/// @return Первая строка.
 QString firstLineOf(const QString &s)
 {
     const int nl = s.indexOf(QLatin1Char('\n'));
     return (nl < 0 ? s : s.left(nl)).trimmed();
 }
 
+/// @brief Разобранное макроопределение `#define`.
 struct Macro {
+    /// Имя макроса (латиница, цифры, `_`).
     QString name;
+    /// Формальные параметры в порядке объявления; пусто — макрос-константа.
     QStringList params;
+    /// Тело макроса без крайних пробелов.
     QString body;
 };
 
 /// Разбирает `#define ИМЯ [пар1; пар2;] @ тело` (см. `def_separ_mac_name`).
+/// @param[in]  text  текст определения, начиная с `#define`
+/// @param[out] m     разобранный макрос
+/// @param[out] why   причина отказа (на текущем языке), если разбор не удался
+/// @return true — определение разобрано.
 bool parseMacro(const QString &text, Macro *m, QString *why)
 {
     const int at = text.indexOf(QLatin1Char('@'));
     if (at < 0) {
-        *why = QStringLiteral("нет разделителя '@'");
+        *why = tpl::tr("нет разделителя '@'", "no '@' separator");
         return false;
     }
     if (at < 8) {
-        *why = QStringLiteral("пустое имя");
+        *why = tpl::tr("пустое имя", "empty name");
         return false;
     }
 
@@ -147,7 +183,7 @@ bool parseMacro(const QString &text, Macro *m, QString *why)
     static const QRegularExpression space(QStringLiteral("\\s+"));
     const QStringList firstWords = parts.value(0).split(space, Qt::SkipEmptyParts);
     if (firstWords.isEmpty()) {
-        *why = QStringLiteral("нет имени макроса");
+        *why = tpl::tr("нет имени макроса", "no macro name");
         return false;
     }
     m->name = firstWords.at(0);
@@ -165,7 +201,7 @@ bool parseMacro(const QString &text, Macro *m, QString *why)
     // который ядро прекрасно считает, — ровно та ошибка, ради которой мы тут.
     for (QChar c : m->name) {
         if (!isIdentChar(c)) {
-            *why = QStringLiteral("в имени недопустимый символ");
+            *why = tpl::tr("в имени недопустимый символ", "invalid character in the name");
             return false;
         }
     }
@@ -174,6 +210,8 @@ bool parseMacro(const QString &text, Macro *m, QString *why)
 
 /// `def_buf_gets_param`: первая и последняя скобки фактического параметра
 /// заменяются пробелами (tpl-guide 9.2 — та самая ловушка со `Stm (Stp 10; 2;);`).
+/// @param[in] arg  фактический параметр без крайних пробелов
+/// @return Параметр, у которого внешние `(` и `)` заменены пробелами; иначе как есть.
 QString stripOuterParens(const QString &arg)
 {
     if (arg.size() >= 2 && arg.startsWith(QLatin1Char('(')) && arg.endsWith(QLatin1Char(')')))
@@ -182,6 +220,9 @@ QString stripOuterParens(const QString &arg)
 }
 
 /// Подставляет фактические параметры в тело макроса — по границам идентификаторов.
+/// @param[in] m     макрос
+/// @param[in] args  фактические параметры в порядке формальных
+/// @return Тело макроса с подставленными параметрами.
 QString expandBody(const Macro &m, const QStringList &args)
 {
     QString out;
@@ -209,6 +250,11 @@ QString expandBody(const Macro &m, const QStringList &args)
 /// ⚠️ Совпадение — по ЦЕЛОМУ идентификатору, а не по подстроке: иначе макрос `a`
 /// изуродовал бы слово `radian`. Ядро (`def_buf_gets_mac`) читает максимальный
 /// кусок из [A-Za-z0-9_] и сравнивает целиком — делаем так же.
+/// @param[in]     text      текст записи
+/// @param[in]     m         макрос
+/// @param[in,out] calls     счётчик раскрытых вызовов с параметрами
+/// @param[in,out] warnings  куда дописываются замечания о неразобранных вызовах
+/// @return Текст с раскрытыми вызовами; неразобранный вызов остаётся как есть.
 QString substitute(const QString &text, const Macro &m, int *calls, QStringList *warnings)
 {
     QString out;
@@ -271,8 +317,10 @@ QString substitute(const QString &text, const Macro &m, int *calls, QStringList 
         }
 
         if (bad) {
-            *warnings << QStringLiteral("вызов макроса «%1» не разобран: не хватает "
-                                        "фактических параметров (ожидалось %2)")
+            *warnings << tpl::tr("вызов макроса «%1» не разобран: не хватает "
+                                 "фактических параметров (ожидалось %2)",
+                                 "macro call '%1' not parsed: not enough actual parameters (%2 "
+                                 "expected)")
                              .arg(m.name).arg(m.params.size());
             out += tok;
             i = j;
@@ -291,11 +339,14 @@ QString substitute(const QString &text, const Macro &m, int *calls, QStringList 
 /// ⚠️ Нужно именно на macOS и Linux. Задания пишут на Windows, где регистр в именах
 /// файлов не важен, и `#include lr2_step.h` там открывает `LR2_step.h` без разговоров.
 /// На чужой системе такое задание молча теряло бы все макросы: файл «не найден»,
-/// шаги не раскрылись. Ядро TMC на этих системах ищет так же (см. версию для Linux,
+/// шаги не раскрылись. Ядро TMC на этих системах ищет так же (см. `TMC_Suite_Qt`,
 /// «поиск имени файла без учёта регистра»), поэтому и мы обязаны.
 ///
 /// Точное совпадение проверяется первым: если файл есть, каталог не перебираем.
 /// Возвращает пустую строку, если ничего похожего нет.
+/// @param[in] dir   папка задания
+/// @param[in] name  имя файла из `#include`
+/// @return Полный путь к найденному файлу или пустая строка.
 QString findFileIgnoringCase(const QString &dir, const QString &name)
 {
     const QString exact = QDir(dir).filePath(name);
@@ -311,14 +362,27 @@ QString findFileIgnoringCase(const QString &dir, const QString &name)
     return {};
 }
 
+/// @brief Состояние обработки `#include`: папка, куда складывать имена и замечания,
+///        и лимит вставок против кольцевого включения.
 struct IncludeCtx {
+    /// Папка задания; пусто — включаемые файлы не ищутся.
     QString baseDir;
+    /// Куда дописывать имена вставленных файлов (как в `#include`).
     QStringList *included = nullptr;
+    /// Куда дописывать предупреждения.
     QStringList *warnings = nullptr;
+    /// Куда дописывать ошибки.
     QStringList *errors = nullptr;
+    /// Сколько вставок ещё разрешено (64 на задание).
     int budget = 64;
 };
 
+/// @brief Заменяет строки `#include` содержимым файлов из папки задания.
+///
+/// После каждой вставки повторяет склейку по `\\`, как ядро; вложенные `#include`
+/// обрабатываются тем же проходом. Не найденный файл — предупреждение.
+/// @param[in,out] recs  записи буфера
+/// @param[in,out] ctx   папка, накопители имён и замечаний, лимит вставок
 void processIncludes(Records *recs, IncludeCtx *ctx)
 {
     int i = 0;
@@ -329,7 +393,8 @@ void processIncludes(Records *recs, IncludeCtx *ctx)
             continue;
         }
         if (--ctx->budget < 0) {
-            *ctx->errors << QStringLiteral("слишком много #include — похоже на кольцевую вставку");
+            *ctx->errors << tpl::tr("слишком много #include — похоже на кольцевую вставку",
+                                    "too many #include - looks like a circular inclusion");
             return;
         }
 
@@ -342,7 +407,8 @@ void processIncludes(Records *recs, IncludeCtx *ctx)
         recs->removeAt(i);
 
         if (name.isEmpty()) {
-            *ctx->warnings << QStringLiteral("строка #include без имени файла — пропущена");
+            *ctx->warnings << tpl::tr("строка #include без имени файла — пропущена",
+                                      "#include line without a file name - skipped");
             continue;
         }
 
@@ -361,9 +427,11 @@ void processIncludes(Records *recs, IncludeCtx *ctx)
                 loaded = readTplFileText(full, &content, &err);
         }
         if (!loaded) {
-            *ctx->warnings << QStringLiteral("включаемый файл «%1» не найден рядом с заданием — "
-                                             "макросы из него не раскрыты, задание прочитано "
-                                             "неполно").arg(name);
+            *ctx->warnings << tpl::tr("включаемый файл «%1» не найден рядом с заданием — "
+                                      "макросы из него не раскрыты, задание прочитано "
+                                      "неполно",
+                                      "include file '%1' was not found next to the task - its "
+                                      "macros are not expanded, the task is read incompletely").arg(name);
             continue;
         }
 
@@ -380,6 +448,13 @@ void processIncludes(Records *recs, IncludeCtx *ctx)
     }
 }
 
+/// @brief Раскрывает все `#define` от последнего к первому, каждый только ниже своего места.
+///
+/// Строка определения заменяется пустой (перевод строки сохраняется, чтобы номера
+/// строк в предупреждениях совпадали с исходным файлом). Не больше 1024 определений.
+/// @param[in,out] recs  записи буфера
+/// @param[in,out] res   итог препроцессора: счётчик вызовов, замечания, ошибки
+/// @see https://www.tamic.ru/docs/code/lib-prepr.html
 void expandMacros(Records *recs, PreprocessResult *res)
 {
     for (int guard = 0; guard < 1024; ++guard) {
@@ -416,7 +491,8 @@ void expandMacros(Records *recs, PreprocessResult *res)
         Macro m;
         QString why;
         if (!parseMacro(text, &m, &why)) {
-            res->warnings << QStringLiteral("макроопределение не разобрано (%1): %2")
+            res->warnings << tpl::tr("макроопределение не разобрано (%1): %2",
+                                     "macro definition not parsed (%1): %2")
                                  .arg(why, firstLineOf(text));
             continue;
         }
@@ -425,7 +501,8 @@ void expandMacros(Records *recs, PreprocessResult *res)
         for (int i = idx; i < recs->size(); ++i)
             recs->replace(i, substitute(recs->at(i), m, &res->macroCalls, &res->warnings));
     }
-    res->errors << QStringLiteral("слишком много макроопределений — разбор остановлен");
+    res->errors << tpl::tr("слишком много макроопределений — разбор остановлен",
+                           "too many macro definitions - parsing stopped");
 }
 
 // ===========================================================================
@@ -435,6 +512,10 @@ void expandMacros(Records *recs, PreprocessResult *res)
 /// Строка начинается с ключевого слова, за которым стоит разделитель.
 /// ⚠️ Разделитель обязателен: иначе `TIME_UNIT` совпал бы с `TIME`, а `FREQ_UNIT`
 /// с `FREQ`. В ядре ровно поэтому у всех констант хвостовой пробел.
+/// @param[in]  line  строка плоского текста
+/// @param[in]  key   ключевое слово
+/// @param[out] rest  остаток строки после ключевого слова (nullptr — не нужен)
+/// @return true — строка начинается с ключевого слова, за которым не идёт символ имени.
 bool matchKey(const QString &line, QLatin1String key, QString *rest)
 {
     if (!line.startsWith(key))
@@ -452,6 +533,8 @@ bool matchKey(const QString &line, QLatin1String key, QString *rest)
 
 /// Делит хвост примитива на параметры по ';'. Пустые хвосты отбрасываются,
 /// пробелы и переводы строк внутри параметра снимаются (`expr_del_Blanks2`).
+/// @param[in] text  хвост строки примитива
+/// @return Параметры без крайних пробелов; хвостовые пустые убраны.
 QStringList splitParams(const QString &text)
 {
     QStringList out = text.split(QLatin1Char(';'));
@@ -462,30 +545,41 @@ QStringList splitParams(const QString &text)
     return out;
 }
 
+/// @brief Вид примитива блока: прямоугольник, круг, полигон, вход X/Y, файл
+///        распределения, неизвестный.
 enum class Prim { Rect, Circle, Polygon, InputX, InputY, FileEps, Unknown };
 
+/// @brief Строка таблицы ключевых слов примитивов.
 struct PrimSpec {
+    /// Ключевое слово как в языке (`RECT_STAT_N` ...).
     QLatin1String word;
+    /// Вид примитива.
     Prim prim;
+    /// Плазменный суффикс: "", "_N", "_B", "_Y", "_S".
     const char *suffix;
+    /// true — движущийся блок (`*_MOVE`).
     bool moving;
 };
 
 // Порядок — от длинного к короткому: «RECT_STAT» не должен съесть «RECT_STAT_N».
+/// Таблица ключевых слов примитивов, которые понимает чтение.
 const PrimSpec kPrims[] = {
     {QLatin1String("RECT_STAT_N"),    Prim::Rect,    "_N", false},
     {QLatin1String("RECT_STAT_B"),    Prim::Rect,    "_B", false},
     {QLatin1String("RECT_STAT_Y"),    Prim::Rect,    "_Y", false},
+    {QLatin1String("RECT_STAT_S"),    Prim::Rect,    "_S", false},
     {QLatin1String("RECT_STAT"),      Prim::Rect,    "",   false},
     {QLatin1String("RECT_MOVE"),      Prim::Rect,    "",   true},
     {QLatin1String("CIRCLE_STAT_N"),  Prim::Circle,  "_N", false},
     {QLatin1String("CIRCLE_STAT_B"),  Prim::Circle,  "_B", false},
     {QLatin1String("CIRCLE_STAT_Y"),  Prim::Circle,  "_Y", false},
+    {QLatin1String("CIRCLE_STAT_S"),  Prim::Circle,  "_S", false},
     {QLatin1String("CIRCLE_STAT"),    Prim::Circle,  "",   false},
     {QLatin1String("CIRCLE_MOVE"),    Prim::Circle,  "",   true},
     {QLatin1String("POLYGON_STAT_N"), Prim::Polygon, "_N", false},
     {QLatin1String("POLYGON_STAT_B"), Prim::Polygon, "_B", false},
     {QLatin1String("POLYGON_STAT_Y"), Prim::Polygon, "_Y", false},
+    {QLatin1String("POLYGON_STAT_S"), Prim::Polygon, "_S", false},
     {QLatin1String("POLYGON_STAT"),   Prim::Polygon, "",   false},
     {QLatin1String("POLYGON_MOVE"),   Prim::Polygon, "",   true},
     {QLatin1String("INPUT_X"),        Prim::InputX,  "",   false},
@@ -496,72 +590,136 @@ const PrimSpec kPrims[] = {
     {QLatin1String("FILE"),           Prim::FileEps, "",   false},
 };
 
+/// @brief Блок `BLOCK n; ... END_B` как он записан в файле, до сборки модели.
 struct RawBlock {
+    /// Номер блока.
     int id = 0;
+    /// Номер строки исходного файла (для сообщений).
     int line = 0;
+    /// Вид примитива.
     Prim prim = Prim::Unknown;
     QString word;      ///< как написано в файле — для сообщений
-    QString suffix;    ///< "", "_N", "_B", "_Y"
+    QString suffix;    ///< "", "_N", "_B", "_Y", "_S"
+    /// Движущийся блок (`*_MOVE`).
     bool moving = false;
     QStringList params;                       ///< для RECT/CIRCLE/INPUT/FILE, первый — материал
     QVector<QPair<QString, QString>> points;  ///< для POLYGON
     QStringList extra;                        ///< хвост POLYGON_MOVE (скорости)
+    /// Текст блока без разбора (для сообщений).
     QString raw;
 };
 
+/// @brief Содержимое `#PARM` шага; величины уже переведены в мм, нс, ГГц.
 struct RawParams {
+    /// Единица углов (`ANGLE_UNIT`).
     AngleUnit angle = AngleUnit::Radian;
+    /// Множитель `LONG_UNIT` -> мм.
     double longToMm = 1.0;
+    /// Множитель `TIME_UNIT` -> нс.
     double timeToNs = 1.0;
+    /// Множитель `FREQ_UNIT` -> ГГц.
     double freqToGHz = 1.0;
+    /// Единица длины файла (переносится в модель как единица ввода).
     LengthUnit lengthUnit = LengthUnit::Millimeter;
+    /// Шаг сетки `DELTA`, мм.
     double delta = 1.0;
+    /// Начало счёта `TIME`, нс.
     double timeMin = 0.0;
+    /// Конец счёта `TIME`, нс.
     double timeMax = 0.0;
+    /// Граница области `X_MIN`, мм (остальные — `xMax`, `yMin`, `yMax`).
     double xMin = 0.0, xMax = 0.0, yMin = 0.0, yMax = 0.0;
+    /// Частота шага `FREQ`, ГГц.
     double freq = 0.0;
+    /// `TIME_UNIT` задан явно.
     bool haveTimeUnit = false;
+    /// Хоть одна строка `#PARM` разобрана.
     bool haveAny = false;
 };
+/// @var RawParams::xMax
+/// Граница области `X_MAX`, мм.
+/// @var RawParams::yMin
+/// Граница области `Y_MIN`, мм.
+/// @var RawParams::yMax
+/// Граница области `Y_MAX`, мм.
 
+/// @brief Содержимое `#OUTPUT` шага.
 struct RawOutput {
+    /// Имя файла сигналов (`FILE`).
     QString file;
+    /// Есть `TOPOLOGY;`.
     bool topology = false;
+    /// Есть `FIELDS;`.
     bool fields = false;
+    /// Есть строка `SMATRIX`.
     bool sMatrix = false;
+    /// Имя файла S-матрицы.
     QString sFile;
+    /// Начало окна S-матрицы, нс.
     double sTMin = 0.0, sTMax = 0.0;
+    bool sNoWindow = false; ///< `SMATRIX имя; F;` — окно на весь счёт (многочастотный режим)
+    /// Есть строка ДН (`FIELD_DISTRIBUTION` или `FIELD_DISTRIBUTION_M`).
     bool pattern = false;
+    /// ДН вариантом `_M` (накопление в памяти).
     bool patternInMemory = true;
+    /// Имя файлов ДН.
     QString pFile;
+    /// Начало окна ДН, нс.
     double pTMin = 0.0, pTMax = 0.0;
 };
+/// @var RawOutput::sTMax
+/// Конец окна S-матрицы, нс.
+/// @var RawOutput::pTMax
+/// Конец окна ДН, нс.
 
+/// @brief Один шаг `#STEP ... #END_STEP` как он записан в файле.
 struct RawStep {
+    /// Номер строки `#STEP` в исходном файле.
     int line = 0;
+    /// Параметры шага.
     RawParams parm;
+    /// Блоки `#TOPOLOGY` в порядке записи.
     QVector<RawBlock> blocks;
     QHash<int, QPointF> links; ///< анкеры, уже в мм
+    /// Номера блоков, у которых есть строка `T` в `#LINK_LIST`.
     QSet<int> linkIds;
+    /// Секция `#OUTPUT`.
     RawOutput out;
 };
 
 /// Общий контекст разбора: складывать предупреждения удобнее в одно место.
 struct Ctx {
+    /// Куда дописывать предупреждения.
     QStringList *warnings = nullptr;
+    /// Куда дописывать ошибки.
     QStringList *errors = nullptr;
     /// Папка задания: рядом с `.tpl` лежат и профили `.eps`, и файлы падающей
     /// волны `.sig`. Без неё сигнал из файла прочитать нечем.
     QString baseDir;
+    /// А-13: единицы действуют на всю секцию `#PARM` (см. `readTplFile`).
+    bool unitsFirst = false;
+    /// Куда записывать строки с единицей ниже величины (А-13); nullptr — не нужно.
+    QList<int> *unitAfterValue = nullptr;
 
+    /// @brief Дописывает предупреждение с номером строки исходного файла.
+    /// @param[in] line  номер строки
+    /// @param[in] text  текст замечания (на текущем языке)
     void warn(int line, const QString &text) const
     {
-        *warnings << QStringLiteral("строка %1: %2").arg(line).arg(text);
+        *warnings << tpl::tr("строка %1: %2", "line %1: %2").arg(line).arg(text);
     }
 };
 
 /// Вычисляет числовой параметр. Не вычислилось — предупреждаем и отдаём запасное
 /// значение: файл, написанный руками, не обязан состоять из одних констант.
+/// @param[in]  ctx       контекст разбора (для предупреждения)
+/// @param[in]  line      номер строки
+/// @param[in]  what      что вычисляется (для сообщения)
+/// @param[in]  text      выражение из файла
+/// @param[in]  angle     единица углов шага
+/// @param[in]  fallback  значение, если выражение не вычислилось
+/// @param[out] ok        признак успеха (nullptr — не нужен)
+/// @return Значение выражения или `fallback`.
 double evalOr(const Ctx &ctx, int line, const QString &what, const QString &text,
               AngleUnit angle, double fallback, bool *ok = nullptr)
 {
@@ -570,11 +728,16 @@ double evalOr(const Ctx &ctx, int line, const QString &what, const QString &text
         *ok = v.has_value();
     if (v.has_value())
         return *v;
-    ctx.warn(line, QStringLiteral("не удалось вычислить %1: «%2» — взято %3")
+    ctx.warn(line, tpl::tr("не удалось вычислить %1: «%2» — взято %3",
+                           "could not evaluate %1: '%2' - %3 taken")
                        .arg(what, text.trimmed(), QString::number(fallback)));
     return fallback;
 }
 
+/// @brief Переводит имя `LONG_UNIT` в множитель к миллиметрам.
+/// @param[in]  name  `mm`, `cm` или `m` (иное — мм)
+/// @param[out] unit  единица длины для модели
+/// @return Множитель: 1, 10 или 1000.
 double lengthUnitFactor(const QString &name, LengthUnit *unit)
 {
     if (name == QLatin1String("cm")) { *unit = LengthUnit::Centimeter; return 10.0; }
@@ -583,6 +746,9 @@ double lengthUnitFactor(const QString &name, LengthUnit *unit)
     return 1.0; // mm
 }
 
+/// @brief Переводит имя `TIME_UNIT` в множитель к наносекундам.
+/// @param[in] name  `s`, `ms`, `mks`, `ns`, `ps` (иное — нс)
+/// @return Множитель к нс.
 double timeUnitFactorNs(const QString &name)
 {
     if (name == QLatin1String("s"))   return 1.0e9;
@@ -592,6 +758,9 @@ double timeUnitFactorNs(const QString &name)
     return 1.0; // ns
 }
 
+/// @brief Переводит имя `FREQ_UNIT` в множитель к гигагерцам.
+/// @param[in] name  `Hz`, `kHz`, `MHz`, `GHz` (иное — ГГц)
+/// @return Множитель к ГГц.
 double freqUnitFactorGHz(const QString &name)
 {
     if (name == QLatin1String("Hz"))  return 1.0e-9;
@@ -601,6 +770,12 @@ double freqUnitFactorGHz(const QString &name)
 }
 
 /// Разбирает один `BLOCK n; ... END_B`.
+/// @param[in] ctx        контекст разбора (для предупреждений)
+/// @param[in] id         номер блока
+/// @param[in] line       номер строки `BLOCK` в исходном файле
+/// @param[in] bodyLines  строки тела блока до `END_B`
+/// @return Блок с видом примитива и параметрами; при неизвестном примитиве —
+///         `Prim::Unknown` (блок пропускается с предупреждением).
 RawBlock parseBlock(const Ctx &ctx, int id, int line, const QStringList &bodyLines)
 {
     RawBlock b;
@@ -628,7 +803,8 @@ RawBlock parseBlock(const Ctx &ctx, int id, int line, const QStringList &bodyLin
     }
 
     if (b.prim == Prim::Unknown) {
-        ctx.warn(line, QStringLiteral("BLOCK %1: неизвестный примитив — блок пропущен: %2")
+        ctx.warn(line, tpl::tr("BLOCK %1: неизвестный примитив — блок пропущен: %2",
+                               "BLOCK %1: unknown primitive - block skipped: %2")
                            .arg(id).arg(firstLineOf(b.raw)));
         return b;
     }
@@ -643,7 +819,8 @@ RawBlock parseBlock(const Ctx &ctx, int id, int line, const QStringList &bodyLin
     // (`CalcEOL` в TmcRTH_BolckList.cpp), и меньше трёх не примет.
     const int semi = text.indexOf(QLatin1Char(';'));
     if (semi < 0) {
-        ctx.warn(line, QStringLiteral("BLOCK %1: у полигона нет материала").arg(id));
+        ctx.warn(line, tpl::tr("BLOCK %1: у полигона нет материала",
+                               "BLOCK %1: the polygon has no material").arg(id));
         return b;
     }
     b.params << text.left(semi).trimmed();
@@ -658,7 +835,8 @@ RawBlock parseBlock(const Ctx &ctx, int id, int line, const QStringList &bodyLin
             if (xy.size() >= 2)
                 b.points << qMakePair(xy.at(0), xy.at(1));
             else
-                ctx.warn(line, QStringLiteral("BLOCK %1: строка «%2» не похожа на вершину L x; y;")
+                ctx.warn(line, tpl::tr("BLOCK %1: строка «%2» не похожа на вершину L x; y;",
+                                       "BLOCK %1: line '%2' does not look like a vertex L x; y;")
                                    .arg(id).arg(t));
         } else {
             b.extra += splitParams(t);
@@ -669,9 +847,66 @@ RawBlock parseBlock(const Ctx &ctx, int id, int line, const QStringList &bodyLin
 
 /// Разбирает `#PARM ... #END_PARM`. Отсутствующие поля наследуются от предыдущего
 /// шага — так же, как это делает ядро (tpl-guide 4).
+/// @param[in]     ctx        контекст разбора
+/// @param[in]     lines      строки между `#PARM` и `#END_PARM`
+/// @param[in]     firstLine  номер первой из них в исходном файле
+/// @param[in,out] p          параметры шага (на входе — унаследованные от предыдущего)
 void parseParm(const Ctx &ctx, const QStringList &lines, int firstLine, RawParams *p)
 {
-    for (int i = 0; i < lines.size(); ++i) {
+    // А-13 (ответ автора 29.10.2026): единица ниже своей величины в той же секции.
+    // Те же пары, что проверяет ядро (CheckUnitBeforeValues): LONG_UNIT — X_MIN...Y_MAX,
+    // DELTA, HEIGHT; TIME_UNIT — TIME, DELTA_T; FREQ_UNIT — FREQ. ANGLE_UNIT ядро не
+    // проверяет — и мы тоже.
+    QVector<int> order;
+    order.reserve(lines.size());
+    {
+        bool seenLong = false, seenTime = false, seenFreq = false;
+        QVector<int> units, others;
+        for (int i = 0; i < lines.size(); ++i) {
+            const QString t = lines.at(i).trimmed();
+            QString rest;
+            bool misplaced = false;
+            bool isUnit = true;
+            if (matchKey(t, QLatin1String("LONG_UNIT"), &rest))
+                misplaced = seenLong;
+            else if (matchKey(t, QLatin1String("TIME_UNIT"), &rest))
+                misplaced = seenTime;
+            else if (matchKey(t, QLatin1String("FREQ_UNIT"), &rest))
+                misplaced = seenFreq;
+            else if (matchKey(t, QLatin1String("ANGLE_UNIT"), &rest))
+                misplaced = false;
+            else
+                isUnit = false;
+            if (!isUnit) {
+                for (const char *k : {"X_MIN", "X_MAX", "Y_MIN", "Y_MAX", "DELTA", "HEIGHT"})
+                    seenLong |= matchKey(t, QLatin1String(k), &rest);
+                seenTime |= matchKey(t, QLatin1String("TIME"), &rest)
+                            || matchKey(t, QLatin1String("DELTA_T_MECHANICAL"), &rest);
+                seenFreq |= matchKey(t, QLatin1String("FREQ"), &rest);
+            }
+            if (misplaced) {
+                if (ctx.unitAfterValue)
+                    *ctx.unitAfterValue << firstLine + i;
+                if (!ctx.unitsFirst)
+                    ctx.warn(firstLine + i,
+                             tpl::tr("единица «%1» стоит ниже своей величины. Величина выше "
+                                     "прочитана в прежней единице; ядра с 29.10.2026 такое "
+                                     "задание отвергают. При сохранении единицы встанут первыми",
+                                     "unit '%1' is written below its value. The value above was "
+                                     "read in the previous unit; kernels since 29.10.2026 reject "
+                                     "such a task. On saving the units will go first")
+                                 .arg(firstLineOf(t)));
+            }
+            (isUnit ? units : others) << i;
+        }
+        if (ctx.unitsFirst)
+            order << units << others;   // строки единиц — наверх, порядок прочих прежний
+        else
+            for (int i = 0; i < lines.size(); ++i)
+                order << i;
+    }
+
+    for (int i : std::as_const(order)) {
         const QString t = lines.at(i).trimmed();
         const int ln = firstLine + i;
         if (t.isEmpty())
@@ -693,9 +928,11 @@ void parseParm(const Ctx &ctx, const QStringList &lines, int firstLine, RawParam
                               p->angle, p->delta / p->longToMm) * p->longToMm;
         } else if (matchKey(t, QLatin1String("TIME"), &rest)) {
             const QStringList v = splitParams(rest);
-            p->timeMin = evalOr(ctx, ln, QStringLiteral("начало TIME"), v.value(0), p->angle, 0.0)
+            p->timeMin = evalOr(ctx, ln, tpl::tr("начало TIME",
+                                                 "the start of TIME"), v.value(0), p->angle, 0.0)
                          * p->timeToNs;
-            p->timeMax = evalOr(ctx, ln, QStringLiteral("конец TIME"), v.value(1), p->angle, 0.0)
+            p->timeMax = evalOr(ctx, ln, tpl::tr("конец TIME",
+                                                 "the end of TIME"), v.value(1), p->angle, 0.0)
                          * p->timeToNs;
         } else if (matchKey(t, QLatin1String("X_MIN"), &rest)) {
             p->xMin = evalOr(ctx, ln, QStringLiteral("X_MIN"), splitParams(rest).value(0),
@@ -717,15 +954,25 @@ void parseParm(const Ctx &ctx, const QStringList &lines, int firstLine, RawParam
             // Мёртвые параметры (Баг #16): разбираются, но на расчёт не влияют.
         } else if (matchKey(t, QLatin1String("HEIGHT"), &rest)
                    || matchKey(t, QLatin1String("DELTA_T_MECHANICAL"), &rest)) {
-            ctx.warn(ln, QStringLiteral("параметр «%1» на расчёт не влияет и в модель "
-                                        "не переносится").arg(firstLineOf(t)));
+            ctx.warn(ln, tpl::tr("параметр «%1» на расчёт не влияет и в модель "
+                                 "не переносится",
+                                 "parameter '%1' does not affect the computation and is not "
+                                 "carried into the model").arg(firstLineOf(t)));
         } else {
-            ctx.warn(ln, QStringLiteral("непонятная строка в #PARM: «%1»").arg(t));
+            ctx.warn(ln, tpl::tr("непонятная строка в #PARM: «%1»",
+                                 "unclear line in #PARM: '%1'").arg(t));
         }
         p->haveAny = true;
     }
 }
 
+/// @brief Разбирает `#OUTPUT ... #END_OUTPUT`: `FILE`, `TOPOLOGY`, `FIELDS`, `SMATRIX`,
+///        `FIELD_DISTRIBUTION[_M]`; времена переводятся в нс.
+/// @param[in]  ctx        контекст разбора
+/// @param[in]  lines      строки секции
+/// @param[in]  firstLine  номер первой из них в исходном файле
+/// @param[in]  parm       параметры шага (единицы углов и времени)
+/// @param[out] o          разобранная секция
 void parseOutput(const Ctx &ctx, const QStringList &lines, int firstLine, const RawParams &parm,
                  RawOutput *o)
 {
@@ -744,13 +991,17 @@ void parseOutput(const Ctx &ctx, const QStringList &lines, int firstLine, const 
             const QStringList v = splitParams(rest);
             o->pattern = true;
             o->pFile = v.value(0);
-            o->pTMin = evalOr(ctx, ln, QStringLiteral("T_min диаграммы"), v.value(2), parm.angle,
+            o->pTMin = evalOr(ctx, ln, tpl::tr("T_min диаграммы",
+                                               "pattern T_min"), v.value(2), parm.angle,
                               0.0) * parm.timeToNs;
-            o->pTMax = evalOr(ctx, ln, QStringLiteral("T_max диаграммы"), v.value(3), parm.angle,
+            o->pTMax = evalOr(ctx, ln, tpl::tr("T_max диаграммы",
+                                               "pattern T_max"), v.value(3), parm.angle,
                               0.0) * parm.timeToNs;
             if (!o->patternInMemory) {
-                ctx.warn(ln, QStringLiteral("FIELD_DISTRIBUTION без _M дёргает диск на каждом "
-                                            "такте; при записи будет использован вариант _M"));
+                ctx.warn(ln, tpl::tr("FIELD_DISTRIBUTION без _M дёргает диск на каждом "
+                                     "такте; при записи будет использован вариант _M",
+                                     "FIELD_DISTRIBUTION without _M hits the disk at every time "
+                                     "step; the _M variant will be used when saving"));
             }
         } else if (matchKey(t, QLatin1String("FIELDS"), &rest)) {
             o->fields = true;
@@ -760,17 +1011,32 @@ void parseOutput(const Ctx &ctx, const QStringList &lines, int firstLine, const 
             const QStringList v = splitParams(rest);
             o->sMatrix = true;
             o->sFile = v.value(0);
-            o->sTMin = evalOr(ctx, ln, QStringLiteral("T_min S-матрицы"), v.value(2), parm.angle,
+            if (v.size() < 4) {
+                // Без окна строка законна только в многочастотном режиме (вход с файлом
+                // сигнала): это окно на весь счёт. В одночастотном ядро с 26.10.2026
+                // отвергает шаг — об этом скажет сборка модели, она видит входы.
+                o->sNoWindow = true;
+                continue;
+            }
+            o->sTMin = evalOr(ctx, ln, tpl::tr("T_min S-матрицы",
+                                               "S-matrix T_min"), v.value(2), parm.angle,
                               0.0) * parm.timeToNs;
-            o->sTMax = evalOr(ctx, ln, QStringLiteral("T_max S-матрицы"), v.value(3), parm.angle,
+            o->sTMax = evalOr(ctx, ln, tpl::tr("T_max S-матрицы",
+                                               "S-matrix T_max"), v.value(3), parm.angle,
                               0.0) * parm.timeToNs;
         } else {
-            ctx.warn(ln, QStringLiteral("непонятная строка в #OUTPUT: «%1»").arg(t));
+            ctx.warn(ln, tpl::tr("непонятная строка в #OUTPUT: «%1»",
+                                 "unclear line in #OUTPUT: '%1'").arg(t));
         }
     }
 }
 
 /// Режет плоский текст на шаги. Собственно физика — уже следующим этапом.
+/// @param[in]  ctx        контекст разбора
+/// @param[in]  flat       текст после препроцессора
+/// @param[out] sawHeader  встречен ли `#TMC_RT_H`
+/// @param[out] sawEof     встречен ли `#EOF`
+/// @return Шаги в порядке файла; `#PARM` каждого наследует параметры предыдущего.
 QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader, bool *sawEof)
 {
     const QStringList lines = flat.split(QLatin1Char('\n'));
@@ -794,7 +1060,8 @@ QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader
         }
         if (!t.startsWith(QLatin1String("#STEP"))) {
             if (!t.isEmpty() && t.startsWith(QLatin1Char('#')))
-                ctx.warn(i + 1, QStringLiteral("секция вне шага пропущена: «%1»").arg(t));
+                ctx.warn(i + 1, tpl::tr("секция вне шага пропущена: «%1»",
+                                        "section outside a step skipped: '%1'").arg(t));
             ++i;
             continue;
         }
@@ -856,15 +1123,18 @@ QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader
                         if (i < lines.size() && lines.at(i).trimmed().startsWith(QLatin1String("END_B")))
                             ++i;
                         if (id < 1) {
-                            ctx.warn(blockLine, QStringLiteral("номер блока должен быть >= 1 — "
-                                                               "блок пропущен"));
+                            ctx.warn(blockLine, tpl::tr("номер блока должен быть >= 1 — "
+                                                        "блок пропущен",
+                                                        "the block number must be >= 1 - block "
+                                                        "skipped"));
                             continue;
                         }
                         step.blocks << parseBlock(ctx, id, blockLine, body);
                         continue;
                     }
                     if (!b.isEmpty())
-                        ctx.warn(i + 1, QStringLiteral("строка в #TOPOLOGY вне блока: «%1»").arg(b));
+                        ctx.warn(i + 1, tpl::tr("строка в #TOPOLOGY вне блока: «%1»",
+                                                "line in #TOPOLOGY outside a block: '%1'").arg(b));
                     ++i;
                 }
                 if (i < lines.size() && lines.at(i).trimmed().startsWith(QLatin1String("#END_TOPOLOGY")))
@@ -885,21 +1155,24 @@ QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader
                         v.removeAll(QString()); // терпим лишний ';' — он встречается в эталонах
                         if (v.size() >= 3) {
                             const int id = v.at(0).toInt();
-                            const double x = evalOr(ctx, i + 1, QStringLiteral("X0 анкера"),
+                            const double x = evalOr(ctx, i + 1, tpl::tr("X0 анкера", "anchor X0"),
                                                     v.at(1), step.parm.angle, 0.0)
                                              * step.parm.longToMm;
-                            const double y = evalOr(ctx, i + 1, QStringLiteral("Y0 анкера"),
+                            const double y = evalOr(ctx, i + 1, tpl::tr("Y0 анкера", "anchor Y0"),
                                                     v.at(2), step.parm.angle, 0.0)
                                              * step.parm.longToMm;
                             step.links.insert(id, QPointF(x, y));
                             step.linkIds.insert(id);
                         } else if (!b.isEmpty()) {
-                            ctx.warn(i + 1, QStringLiteral("строка #LINK_LIST не разобрана: «%1»")
+                            ctx.warn(i + 1, tpl::tr("строка #LINK_LIST не разобрана: «%1»",
+                                                    "#LINK_LIST line not parsed: '%1'")
                                                 .arg(b));
                         }
                     } else if (!b.isEmpty()) {
-                        ctx.warn(i + 1, QStringLiteral("строка в #LINK_LIST не похожа на T n; x; y;: "
-                                                       "«%1»").arg(b));
+                        ctx.warn(i + 1, tpl::tr("строка в #LINK_LIST не похожа на T n; x; y;: "
+                                                "«%1»",
+                                                "line in #LINK_LIST does not look like T n; x; "
+                                                "y;: '%1'").arg(b));
                     }
                     ++i;
                 }
@@ -924,7 +1197,8 @@ QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader
             }
 
             if (!s.isEmpty() && s.startsWith(QLatin1Char('#')))
-                ctx.warn(i + 1, QStringLiteral("неизвестная секция «%1» пропущена").arg(s));
+                ctx.warn(i + 1, tpl::tr("неизвестная секция «%1» пропущена",
+                                        "unknown section '%1' skipped").arg(s));
             ++i;
         }
 
@@ -946,6 +1220,10 @@ QVector<RawStep> parseSteps(const Ctx &ctx, const QString &flat, bool *sawHeader
 /// тремя величинами; склейкой занимается mergePlasmaInto().
 /// Непустая `formula` означает, что величина задана выражением от координат; тогда
 /// `value` не используется, а в файл при сохранении уйдёт сама формула.
+/// @param[in,out] s        фигура
+/// @param[in]     suffix   суффикс примитива: "_N", "_B", "_Y" или "_S" (иное — без изменений)
+/// @param[in]     value    числовое значение (м^-3, Тл, безразмерное Y, См/м)
+/// @param[in]     formula  формула величины; пусто — число
 void applyPlasma(Shape &s, QStringView suffix, double value, const QString &formula = QString())
 {
     if (suffix == QLatin1String("_N")) {
@@ -960,9 +1238,17 @@ void applyPlasma(Shape &s, QStringView suffix, double value, const QString &form
         s.plasma.hasY = true;
         s.plasma.y = value;
         s.plasma.yFormula = formula;
+    } else if (suffix == QLatin1String("_S")) {
+        s.plasma.hasS = true;
+        s.plasma.s = value;
+        s.plasma.sFormula = formula;
     }
 }
 
+/// @brief Сравнивает две вершины с допуском 1e-6 мм.
+/// @param[in] a  первая точка, мм
+/// @param[in] b  вторая точка, мм
+/// @return true — точки совпадают в пределах допуска.
 bool samePoint(const QPointF &a, const QPointF &b)
 {
     // Допуск — одна миллионная миллиметра, а не машинный ноль. Координаты приходят
@@ -1002,6 +1288,10 @@ bool samePoint(const QPointF &a, const QPointF &b)
 /// сохранении повтор вершины сменится точкой посередине, — но ТЕРЯТЬ тут нечего:
 /// это одна и та же обходка одного и того же ограничения ядра, записанная двумя
 /// способами. Предупреждать надо о потерях, а не о смене записи.
+/// @param[in]     ctx   контекст разбора (не используется)
+/// @param[in]     line  номер строки (не используется)
+/// @param[in]     id    номер блока (не используется)
+/// @param[in,out] pts   вершины полигона, мм
 void dropPaddingPoints(const Ctx &ctx, int line, int id, QVector<QPointF> *pts)
 {
     Q_UNUSED(ctx);
@@ -1029,7 +1319,14 @@ void dropPaddingPoints(const Ctx &ctx, int line, int id, QVector<QPointF> *pts)
 /// того файла, где формула написана, а модель редактора и выдаваемый им файл всегда
 /// в миллиметрах. Формулу из файла в сантиметрах надо пересчитать, иначе профиль
 /// растянется вдесятеро.
-void applyMaterial(const Ctx & /*ctx*/, int /*line*/, const QString &first, const QString &suffix,
+/// @param[in]     ctx       контекст разбора
+/// @param[in]     line      номер строки блока
+/// @param[in]     first     первый параметр блока (материал, число, `[имя]выражение`)
+/// @param[in]     suffix    плазменный суффикс примитива ("" — обычный блок)
+/// @param[in]     angle     единица углов шага
+/// @param[in]     longToMm  множитель `LONG_UNIT` -> мм (для пересчёта формул)
+/// @param[in,out] s         фигура: материал, eps, профиль или плазменная величина
+void applyMaterial(const Ctx &, int, const QString &first, const QString &suffix,
                    AngleUnit angle, double longToMm, Shape *s)
 {
     QString expr = first;
@@ -1124,6 +1421,9 @@ void applyMaterial(const Ctx & /*ctx*/, int /*line*/, const QString &first, cons
     // и об этом скажет валидатор — ровно тому, кто такое имя задал.
 }
 
+/// @brief Форматирует число для ключей сравнения (12 значащих цифр).
+/// @param[in] v  число
+/// @return Текст числа.
 QString num(double v)
 {
     return QString::number(v, 'g', 12);
@@ -1131,6 +1431,8 @@ QString num(double v)
 
 /// Ключ ГЕОМЕТРИИ — без материала и плазмы. Нужен, чтобы узнать три плазменных
 /// блока одной и той же фигуры.
+/// @param[in] s  фигура
+/// @return Строка-ключ: вид фигуры, скорость и координаты (12 значащих цифр).
 QString shapeGeometryKey(const Shape &s)
 {
     QStringList p;
@@ -1152,6 +1454,11 @@ QString shapeGeometryKey(const Shape &s)
     return p.join(QLatin1Char('|'));
 }
 
+/// @brief Строит полный ключ фигуры: геометрия, материал, eps, профиль и плазма.
+///
+/// По нему одна и та же фигура узнаётся в разных шагах (частоты, варианты).
+/// @param[in] s  фигура
+/// @return Строка-ключ.
 QString shapeKey(const Shape &s)
 {
     // Профиль входит в ключ наравне с материалом: две одинаковые по форме области с
@@ -1167,37 +1474,51 @@ QString shapeKey(const Shape &s)
                        s.epsProfile.customOrigin ? num(s.epsProfile.origin.x()) : QString(),
                        s.epsProfile.customOrigin ? num(s.epsProfile.origin.y()) : QString(),
                        QString::number(int(s.plasma.hasN)), num(s.plasma.n), s.plasma.nFile,
-                       QString::number(int(s.plasma.hasB)), num(s.plasma.b),
-                       QString::number(int(s.plasma.hasY)), num(s.plasma.y)}
+                       QString::number(int(s.plasma.hasB)), num(s.plasma.b), s.plasma.bFile,
+                       QString::number(int(s.plasma.hasY)), num(s.plasma.y), s.plasma.yFile,
+                       QString::number(int(s.plasma.hasS)), num(s.plasma.s)}
         .join(QLatin1Char('|'));
 }
 
-/// Собирает `_N`, `_B` и `_Y` одной области обратно в ОДНУ фигуру модели.
+/// Собирает `_N`, `_B`, `_Y` и `_S` одной области обратно в ОДНУ фигуру модели.
 ///
-/// ⚠️ Эмиттер пишет B и Y всегда ПРЯМОУГОЛЬНИКОМ по габариту фигуры: круглым и
-/// полигональным вариантам этих примитивов ядро не верит (в диспетчере
-/// `TmcRTH_BolckList.cpp:609,627` теги `CIRCLE_STAT_B`/`POLYGON_STAT_B`
-/// сравниваются по длине `CIRCLE_STAT `, и подмагничивание молча становится
-/// концентрацией). Поэтому рамку по габариту тоже узнаём как «та же фигура».
-bool mergePlasmaInto(QVector<Shape> *shapes, const Shape &add)
+/// ⚠️ Эмиттер пишет B прямоугольником ШИРЕ плазмы на `kBMarginCells` шага с каждой
+/// стороны (на границе блока ядро ополовинивает значение, Б-21), а старые версии —
+/// ровно по габариту фигуры. Поэтому «той же фигурой» считается и прямоугольник B,
+/// который накрывает габарит и выходит за него не дальше этого запаса. `delta` — шаг
+/// сетки шага, из которого блок прочитан.
+/// @param[in,out] shapes  фигуры шага; к подходящей дописывается величина
+/// @param[in]     add     фигура с одной плазменной величиной, прочитанная из блока
+/// @param[in]     delta   шаг сетки этого шага, мм
+/// @return true — величина приклеена к существующей фигуре; false — подходящей нет
+///         (вызывающий добавляет `add` отдельной фигурой).
+bool mergePlasmaInto(QVector<Shape> *shapes, const Shape &add, double delta)
 {
+    const double margin = kBMarginCells * delta + 1e-6;
     for (int i = shapes->size() - 1; i >= 0; --i) {
         Shape &t = (*shapes)[i];
         if (!t.plasma.any())
             continue;
 
         bool same = (shapeGeometryKey(t) == shapeGeometryKey(add));
+        // Блок B ровно по плазме — не наш широкий: держим его как есть (Plasma::bExact).
+        bool exactB = same;
         if (!same && add.kind == ShapeKind::Rectangle && !add.plasma.hasN) {
             double xLo = 0, xHi = 0, yLo = 0, yHi = 0;
             t.bounds(&xLo, &xHi, &yLo, &yHi);
-            same = std::fabs(add.xMin - xLo) < 1e-9 && std::fabs(add.xMax - xHi) < 1e-9
-                   && std::fabs(add.yMin - yLo) < 1e-9 && std::fabs(add.yMax - yHi) < 1e-9;
+            const double dl = xLo - add.xMin, dr = add.xMax - xHi;
+            const double db = yLo - add.yMin, dt = add.yMax - yHi;
+            const bool wider = add.plasma.hasB && add.plasma.bFile.isEmpty();
+            const double lim = wider ? margin : 1e-9;
+            same = dl > -1e-9 && dr > -1e-9 && db > -1e-9 && dt > -1e-9 && dl < lim
+                   && dr < lim && db < lim && dt < lim;
+            exactB = same && dl < 1e-9 && dr < 1e-9 && db < 1e-9 && dt < 1e-9;
         }
         if (!same)
             continue;
 
         if ((add.plasma.hasN && t.plasma.hasN) || (add.plasma.hasB && t.plasma.hasB)
-            || (add.plasma.hasY && t.plasma.hasY))
+            || (add.plasma.hasY && t.plasma.hasY) || (add.plasma.hasS && t.plasma.hasS))
             continue; // величина уже занята — это другая фигура, а не та же
 
         if (add.plasma.hasN) {
@@ -1209,12 +1530,20 @@ bool mergePlasmaInto(QVector<Shape> *shapes, const Shape &add)
         if (add.plasma.hasB) {
             t.plasma.hasB = true;
             t.plasma.b = add.plasma.b;
+            t.plasma.bFile = add.plasma.bFile;
             t.plasma.bFormula = add.plasma.bFormula;
+            t.plasma.bExact = exactB && add.plasma.bFile.isEmpty();
         }
         if (add.plasma.hasY) {
             t.plasma.hasY = true;
             t.plasma.y = add.plasma.y;
+            t.plasma.yFile = add.plasma.yFile;
             t.plasma.yFormula = add.plasma.yFormula;
+        }
+        if (add.plasma.hasS) {
+            t.plasma.hasS = true;
+            t.plasma.s = add.plasma.s;
+            t.plasma.sFormula = add.plasma.sFormula;
         }
         // Анкер формулы приходит вместе с той величиной, которая формулой и задана.
         if (add.plasma.customOrigin && !t.plasma.customOrigin) {
@@ -1226,6 +1555,11 @@ bool mergePlasmaInto(QVector<Shape> *shapes, const Shape &add)
     return false;
 }
 
+/// @brief Строит ключ порта: сторона, апертура, плоскость и мода.
+///
+/// По нему один и тот же порт узнаётся в разных шагах.
+/// @param[in] p  порт
+/// @return Строка-ключ.
 QString portKey(const Port &p)
 {
     // Сторона, а не только ось: у волновода оба входа — INPUT_X с одной и той же
@@ -1246,6 +1580,12 @@ QString portKey(const Port &p)
 ///
 /// ⚠️ Имя файла ищем БЕЗ учёта регистра, как и `#include`: задания пишут на Windows,
 /// где регистр не значим, а читать их могут на Linux и macOS, где значим.
+/// @param[in]     ctx      контекст разбора (папка задания, предупреждения)
+/// @param[in]     line     номер строки входа
+/// @param[in]     ampExpr  параметр Amp из файла
+/// @param[in,out] port     порт: источник, имя файла и форма волны
+/// @return true — Amp задан `[имя]` и файл прочитан; false — Amp не файл, либо файл
+///         не найден или имя испорчено (с предупреждением).
 bool restoreFileSignal(const Ctx &ctx, int line, const QString &ampExpr, Port *port)
 {
     const QString s = ampExpr.trimmed();
@@ -1254,14 +1594,16 @@ bool restoreFileSignal(const Ctx &ctx, int line, const QString &ampExpr, Port *p
     const int close = s.indexOf(QLatin1Char(']'));
     if (close < 0) {
         // Ядро на этом тоже останавливается: «missing ] or bad [ in signal expression».
-        ctx.warn(line, QStringLiteral("в имени файла сигнала «%1» нет закрывающей скобки — "
-                                      "ядро такой файл не примет; вход оставлен без сигнала")
+        ctx.warn(line, tpl::tr("в имени файла сигнала «%1» нет закрывающей скобки — "
+                               "ядро такой файл не примет; вход оставлен без сигнала",
+                               "the signal file name '%1' has no closing bracket - the kernel "
+                               "will not accept such a file; the port is left without a signal")
                            .arg(s));
         return false;
     }
     const QString name = s.mid(1, close - 1).trimmed();
     if (name.isEmpty()) {
-        ctx.warn(line, QStringLiteral("имя файла сигнала пусто"));
+        ctx.warn(line, tpl::tr("имя файла сигнала пусто", "the signal file name is empty"));
         return false;
     }
 
@@ -1275,9 +1617,12 @@ bool restoreFileSignal(const Ctx &ctx, int line, const QString &ampExpr, Port *p
     if (path.isEmpty() || !readTplFileText(path, &text)) {
         // Потеря, а не смена записи: предупреждаем прямо. Порт переводим на
         // непрерывный сигнал, иначе задание нельзя было бы сохранить вовсе.
-        ctx.warn(line, QStringLiteral("файл падающей волны «%1» рядом с заданием не найден — "
-                                      "форма сигнала потеряна, вход переведён на непрерывный "
-                                      "сигнал. Положите файл рядом и откройте задание заново")
+        ctx.warn(line, tpl::tr("файл падающей волны «%1» рядом с заданием не найден — "
+                               "форма сигнала потеряна, вход переведён на непрерывный "
+                               "сигнал. Положите файл рядом и откройте задание заново",
+                               "incident-wave file '%1' was not found next to the task - the "
+                               "signal waveform is lost, the port is switched to a continuous "
+                               "signal. Put the file next to the task and open the task again")
                            .arg(fileName));
         return false;
     }
@@ -1312,21 +1657,28 @@ bool restoreFileSignal(const Ctx &ctx, int line, const QString &ampExpr, Port *p
     t.tableTones = parseSigTones(text);
     port->signal.wave = t;
     if (t.tableTones.size() > kMaxFreqs) {
-        ctx.warn(line, QStringLiteral("в файле «%1» строка #FREQ называет %2, а пакет берёт "
-                                      "не больше %3: обработаются первые %3, остальные %4 "
-                                      "будут отброшены")
+        ctx.warn(line, tpl::tr("в файле «%1» строка #FREQ называет %2, а пакет берёт "
+                               "не больше %3: обработаются первые %3, остальные %4 "
+                               "будут отброшены",
+                               "in file '%1' the #FREQ line names %2, but the package takes at "
+                               "most %3: the first %3 will be processed, the remaining %4 will be "
+                               "discarded")
                            .arg(fileName,
-                                plural(int(t.tableTones.size()), QStringLiteral("тон"),
-                                       QStringLiteral("тона"), QStringLiteral("тонов")))
+                                plural(int(t.tableTones.size()), tpl::tr("тон", "tone"),
+                                       tpl::tr("тона", "tones"), tpl::tr("тонов", "tones")))
                            .arg(kMaxFreqs)
                            .arg(t.tableTones.size() - kMaxFreqs));
     }
     if (t.points.size() < 2) {
-        ctx.warn(line, QStringLiteral("в файле «%1» меньше двух точек — ядро его не примет")
+        ctx.warn(line, tpl::tr("в файле «%1» меньше двух точек — ядро его не примет",
+                               "file '%1' has fewer than two points - the kernel will not accept "
+                               "it")
                            .arg(fileName));
     } else {
-        ctx.warn(line, QStringLiteral("файл «%1» сделан не этой программой: форма взята "
-                                      "таблицей из %2 точек — так ничего не потеряется")
+        ctx.warn(line, tpl::tr("файл «%1» сделан не этой программой: форма взята "
+                               "таблицей из %2 точек — так ничего не потеряется",
+                               "file '%1' was not made by this program: the waveform is taken as "
+                               "a table of %2 points - this way nothing is lost")
                            .arg(fileName).arg(t.points.size()));
     }
     return true;
@@ -1336,6 +1688,14 @@ bool restoreFileSignal(const Ctx &ctx, int line, const QString &ampExpr, Port *p
 ///
 /// Огибающая живёт в Amp — окно ядро режет резко, поэтому «гауссов импульс»
 /// узнаётся именно по виду выражения, а не по узкому окну.
+/// @param[in]     ctx       контекст разбора
+/// @param[in]     line      номер строки входа
+/// @param[in]     ampExpr   параметр Amp
+/// @param[in]     fazaExpr  параметр Faza (пусто — 0)
+/// @param[in]     tMin      начало окна, нс
+/// @param[in]     tMax      конец окна, нс
+/// @param[in]     parm      параметры шага (единица углов, время счёта)
+/// @param[in,out] port      порт: фаза (рад), форма, амплитуда, центр и длительность (нс)
 void restoreSignal(const Ctx &ctx, int line, const QString &ampExpr, const QString &fazaExpr,
                    double tMin, double tMax, const RawParams &parm, Port *port)
 {
@@ -1345,7 +1705,7 @@ void restoreSignal(const Ctx &ctx, int line, const QString &ampExpr, const QStri
 
     port->signal.phase = fazaExpr.trimmed().isEmpty()
                              ? 0.0
-                             : evalOr(ctx, line, QStringLiteral("фазу входа"), fazaExpr,
+                             : evalOr(ctx, line, tpl::tr("фазу входа", "the port phase"), fazaExpr,
                                       parm.angle, 0.0);
     if (parm.angle == AngleUnit::Gradus)
         port->signal.phase *= 3.14159265358979323846 / 180.0; // модель хранит радианы
@@ -1367,11 +1727,14 @@ void restoreSignal(const Ctx &ctx, int line, const QString &ampExpr, const QStri
     const QRegularExpressionMatch m = gauss.match(ampExpr.trimmed());
     if (m.hasMatch()) {
         port->signal.shape = SignalShape::Gaussian;
-        port->signal.amplitude = evalOr(ctx, line, QStringLiteral("амплитуду"), m.captured(1),
+        port->signal.amplitude = evalOr(ctx, line, tpl::tr("амплитуду",
+                                                           "the amplitude"), m.captured(1),
                                         parm.angle, 1.0);
-        port->signal.center = evalOr(ctx, line, QStringLiteral("центр импульса"), m.captured(2),
+        port->signal.center = evalOr(ctx, line, tpl::tr("центр импульса",
+                                                        "the pulse centre"), m.captured(2),
                                      parm.angle, 0.0) * parm.timeToNs;
-        port->signal.duration = evalOr(ctx, line, QStringLiteral("длительность импульса"),
+        port->signal.duration = evalOr(ctx, line, tpl::tr("длительность импульса",
+                                                          "the pulse duration"),
                                        m.captured(3), parm.angle, 1.0) * parm.timeToNs;
         return;
     }
@@ -1379,11 +1742,14 @@ void restoreSignal(const Ctx &ctx, int line, const QString &ampExpr, const QStri
     bool ok = false;
     const double amp = ampExpr.trimmed().isEmpty()
                            ? 1.0
-                           : evalOr(ctx, line, QStringLiteral("амплитуду входа"), ampExpr,
+                           : evalOr(ctx, line, tpl::tr("амплитуду входа",
+                                                       "the port amplitude"), ampExpr,
                                     parm.angle, 1.0, &ok);
     if (!ampExpr.trimmed().isEmpty() && !ok) {
-        ctx.warn(line, QStringLiteral("выражение амплитуды «%1» модель не выражает — взята "
-                                      "постоянная амплитуда 1").arg(ampExpr.trimmed()));
+        ctx.warn(line, tpl::tr("выражение амплитуды «%1» модель не выражает — взята "
+                               "постоянная амплитуда 1",
+                               "the model cannot express the amplitude expression '%1' - a "
+                               "constant amplitude 1 is taken").arg(ampExpr.trimmed()));
         port->signal.shape = SignalShape::Continuous;
         port->signal.amplitude = 1.0;
         return;
@@ -1403,10 +1769,15 @@ void restoreSignal(const Ctx &ctx, int line, const QString &ampExpr, const QStri
 
 /// Модель одного `#STEP` — промежуточное представление перед склейкой.
 struct StepModel {
+    /// Частота шага, ГГц.
     double freq = 0.0;
+    /// Фигуры шага (плазменные блоки уже склеены).
     QVector<Shape> shapes;
+    /// Входы шага.
     QVector<Port> ports;
+    /// Секция `#OUTPUT` шага.
     RawOutput out;
+    /// В шаге есть плазменные блоки.
     bool anyPlasma = false;
 };
 
@@ -1415,6 +1786,8 @@ struct StepModel {
 /// Ядро дописывает `.eps` само (`AddFileEpsExtention`), поэтому в задании имя обычно
 /// написано голым. Но файл могли написать руками и с расширением — тогда, сохранив имя
 /// как есть, мы получили бы при следующей записи `имя.eps.eps`.
+/// @param[in] name  имя из задания
+/// @return Имя без хвоста `.eps` (без учёта регистра).
 QString stripEpsExtension(const QString &name)
 {
     if (name.endsWith(QLatin1String(".eps"), Qt::CaseInsensitive))
@@ -1422,6 +1795,14 @@ QString stripEpsExtension(const QString &name)
     return name;
 }
 
+/// @brief Собирает модель одного шага из сырых блоков: фигуры, плазма, профили, порты.
+///
+/// Переводит локальные координаты блока и анкер `#LINK_LIST` в координаты сцены,
+/// добавку eps-1 — в саму eps, склеивает плазменные блоки одной области и разбирает
+/// входы с восемью параметрами. Всё, что модель не выражает, — предупреждение.
+/// @param[in] ctx   контекст разбора
+/// @param[in] step  сырой шаг
+/// @return Модель шага.
 StepModel buildStep(const Ctx &ctx, const RawStep &step)
 {
     StepModel sm;
@@ -1440,8 +1821,10 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
         if (step.links.contains(b.id)) {
             anchor = step.links.value(b.id);
         } else {
-            ctx.warn(b.line, QStringLiteral("BLOCK %1 не упомянут в #LINK_LIST — ядро такой файл "
-                                            "не примет; принято положение (0;0)").arg(b.id));
+            ctx.warn(b.line, tpl::tr("BLOCK %1 не упомянут в #LINK_LIST — ядро такой файл "
+                                     "не примет; принято положение (0;0)",
+                                     "BLOCK %1 is not mentioned in #LINK_LIST - the kernel will "
+                                     "not accept such a file; position (0;0) assumed").arg(b.id));
         }
 
         if (b.prim == Prim::FileEps) {
@@ -1449,12 +1832,55 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
             // режиме «читать из файла» — тогда она и рисуется, и возвращается в
             // задание дословно.
             //
-            // ⚠️ Все варианты FILE* ядро разбирает ОДНИМ обработчиком: ветка выбирается
-            // сравнением по пяти символам «FILE_» (TmcRTH_BolckList.cpp:566), а сам
-            // ReadFileStat_1 (там же:2903-2929) читает ровно один параметр — имя файла —
-            // и ставит nType = CTMCRTH_BLCKNTYPE_EPS, перезаписав тег на «FILE ».
-            // Значит FILE_N — это НЕ концентрация, а та же проницаемость; о подмене
-            // говорим предупреждением, но блок не теряем.
+            // `FILE_N`, `FILE_B`, `FILE_Y` — величина плазмы из файла (ядро X с
+            // 26.10.2026; раньше разбор сравнивал пять символов `FILE_` и уводил их в
+            // eps). В модели это плазменная фигура-прямоугольник с именем файла; её
+            // склеит с соседними блоками той же области mergePlasmaInto.
+            if (!b.suffix.isEmpty()) {
+                Shape s;
+                s.id = b.id;
+                s.kind = ShapeKind::Rectangle;
+                s.material = Material::Dielectric;
+                const QString file = stripEpsExtension(b.params.value(0).trimmed());
+                if (file.isEmpty()) {
+                    ctx.warn(b.line, tpl::tr("BLOCK %1: у блока FILE%2 не указано имя "
+                                             "файла",
+                                             "BLOCK %1: the FILE%2 block has no file name").arg(b.id).arg(b.suffix));
+                }
+                if (b.suffix == QLatin1String("_N")) {
+                    s.plasma.hasN = true;
+                    s.plasma.nFile = file;
+                } else if (b.suffix == QLatin1String("_B")) {
+                    s.plasma.hasB = true;
+                    s.plasma.bFile = file;
+                } else {
+                    s.plasma.hasY = true;
+                    s.plasma.yFile = file;
+                }
+                if (b.params.size() >= 5) {
+                    s.xMin = evalOr(ctx, b.line, tpl::tr("X_min блока FILE", "FILE block X_min"),
+                                    b.params.value(1), angle, 0.0) * k + anchor.x();
+                    s.xMax = evalOr(ctx, b.line, tpl::tr("X_max блока FILE", "FILE block X_max"),
+                                    b.params.value(2), angle, 0.0) * k + anchor.x();
+                    s.yMin = evalOr(ctx, b.line, tpl::tr("Y_min блока FILE", "FILE block Y_min"),
+                                    b.params.value(3), angle, 0.0) * k + anchor.y();
+                    s.yMax = evalOr(ctx, b.line, tpl::tr("Y_max блока FILE", "FILE block Y_max"),
+                                    b.params.value(4), angle, 0.0) * k + anchor.y();
+                } else {
+                    s.xMin = s.xMax = anchor.x();
+                    s.yMin = s.yMax = anchor.y();
+                }
+                // Анкер ставит сетку файла на место — потерять его значит сдвинуть среду.
+                if (std::hypot(anchor.x(), anchor.y()) > 1e-6) {
+                    s.plasma.customOrigin = true;
+                    s.plasma.origin = anchor;
+                }
+                sm.anyPlasma = true;
+                if (!mergePlasmaInto(&sm.shapes, s, step.parm.delta))
+                    sm.shapes << s;
+                continue;
+            }
+
             Shape s;
             s.id = b.id;
             s.kind = ShapeKind::Rectangle;
@@ -1464,19 +1890,9 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
             s.epsProfile.file = stripEpsExtension(b.params.value(0).trimmed());
 
             if (s.epsProfile.file.isEmpty()) {
-                ctx.warn(b.line, QStringLiteral("BLOCK %1: у блока FILE не указано имя файла "
-                                                "распределения").arg(b.id));
-            }
-            if (!b.suffix.isEmpty()) {
-                ctx.warn(b.line,
-                         QStringLiteral("BLOCK %1: написано FILE%2, но ядро читает любой FILE_* "
-                                        "как распределение диэлектрической проницаемости, а не "
-                                        "%3 — блок прочитан как профиль eps из «%4»")
-                             .arg(b.id).arg(b.suffix,
-                                            b.suffix == QLatin1String("_N")
-                                                ? QStringLiteral("концентрации")
-                                                : QStringLiteral("параметра плазмы"),
-                                            s.epsProfile.file));
+                ctx.warn(b.line, tpl::tr("BLOCK %1: у блока FILE не указано имя файла "
+                                         "распределения",
+                                         "BLOCK %1: the FILE block has no distribution file name").arg(b.id));
             }
 
             // Координаты ядро у этого блока не читает — сетка лежит в самом файле, а
@@ -1485,13 +1901,13 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
             // остаётся точка анкера, и фигура просто не имеет площади.
             const bool haveBox = b.params.size() >= 5;
             if (haveBox) {
-                s.xMin = evalOr(ctx, b.line, QStringLiteral("X_min блока FILE"),
+                s.xMin = evalOr(ctx, b.line, tpl::tr("X_min блока FILE", "FILE block X_min"),
                                 b.params.value(1), angle, 0.0) * k + anchor.x();
-                s.xMax = evalOr(ctx, b.line, QStringLiteral("X_max блока FILE"),
+                s.xMax = evalOr(ctx, b.line, tpl::tr("X_max блока FILE", "FILE block X_max"),
                                 b.params.value(2), angle, 0.0) * k + anchor.x();
-                s.yMin = evalOr(ctx, b.line, QStringLiteral("Y_min блока FILE"),
+                s.yMin = evalOr(ctx, b.line, tpl::tr("Y_min блока FILE", "FILE block Y_min"),
                                 b.params.value(3), angle, 0.0) * k + anchor.y();
-                s.yMax = evalOr(ctx, b.line, QStringLiteral("Y_max блока FILE"),
+                s.yMax = evalOr(ctx, b.line, tpl::tr("Y_max блока FILE", "FILE block Y_max"),
                                 b.params.value(4), angle, 0.0) * k + anchor.y();
             } else {
                 s.xMin = s.xMax = anchor.x();
@@ -1523,22 +1939,27 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
             // или пусто), поэтому молча разбирать это нельзя.
             if (!b.params.value(0).isEmpty() && b.params.value(0) != QLatin1String("MAGNETIC")
                 && b.params.value(0) != QLatin1String("METAL")) {
-                ctx.warn(b.line, QStringLiteral("BLOCK %1: профиль входа выражением («%2») "
-                                                "нынешнее ядро не принимает — оно ждёт METAL, "
-                                                "MAGNETIC или пусто; принята волна H10")
+                ctx.warn(b.line, tpl::tr("BLOCK %1: профиль входа выражением («%2») "
+                                         "нынешнее ядро не принимает — оно ждёт METAL, "
+                                         "MAGNETIC или пусто; принята волна H10",
+                                         "BLOCK %1: the current kernel does not accept a port "
+                                         "profile given by an expression ('%2') - it expects "
+                                         "METAL, MAGNETIC or empty; the H10 wave is assumed")
                                      .arg(b.id).arg(b.params.value(0)));
             }
 
             // Апертура ЛОКАЛЬНАЯ: к ней прибавляется анкер поперёк плоскости входа.
             const double along = alongY ? anchor.y() : anchor.x();
-            p.from = evalOr(ctx, b.line, QStringLiteral("нижнюю границу входа"), b.params.value(1),
+            p.from = evalOr(ctx, b.line, tpl::tr("нижнюю границу входа",
+                                                 "the lower port boundary"), b.params.value(1),
                             angle, 0.0) * k + along;
-            p.to = evalOr(ctx, b.line, QStringLiteral("верхнюю границу входа"), b.params.value(2),
+            p.to = evalOr(ctx, b.line, tpl::tr("верхнюю границу входа",
+                                               "the upper port boundary"), b.params.value(2),
                           angle, 0.0) * k + along;
 
-            const double tMin = evalOr(ctx, b.line, QStringLiteral("T_min входа"),
+            const double tMin = evalOr(ctx, b.line, tpl::tr("T_min входа", "port T_min"),
                                        b.params.value(3), angle, 0.0) * step.parm.timeToNs;
-            const double tMax = evalOr(ctx, b.line, QStringLiteral("T_max входа"),
+            const double tMax = evalOr(ctx, b.line, tpl::tr("T_max входа", "port T_max"),
                                        b.params.value(4), angle, 0.0) * step.parm.timeToNs;
 
             // Плоскость входа ядро берёт буквально из анкера, а «левый/правый»
@@ -1572,26 +1993,51 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
 
             // Восьмой параметр — среда в сечении входа, записанная ДОБАВКОЙ (eps-1).
             // Модель хранит саму eps, поэтому единицу возвращаем здесь.
+            //
+            // Пустой параметр помечаем NaN: решать, «по среде» вход или «вакуум руками»,
+            // можно только когда известны все фигуры (см. конец readTplText).
+            p.eps = std::numeric_limits<double>::quiet_NaN();
             if (b.params.size() > 7 && !b.params.value(7).trimmed().isEmpty()) {
+                // Д-5: W — число или выражение из своих переменных. `t` и `f` в нём ядро
+                // с 26.10.2026 отвергает при разборе: раньше они молча брали значения
+                // предыдущего блока.
+                static const QRegularExpression tf(QStringLiteral("(?<![A-Za-z_0-9])[tf](?![A-Za-z_0-9(])"));
+                if (tf.match(b.params.value(7)).hasMatch()) {
+                    ctx.warn(b.line, tpl::tr("BLOCK %1: в параметре W входа («%2») есть "
+                                             "t или f — ядро такой файл отвергнет. При "
+                                             "сохранении W будет записан числом",
+                                             "BLOCK %1: the port W parameter ('%2') contains t or "
+                                             "f - the kernel will reject such a file. W will be "
+                                             "written as a number when saving")
+                                         .arg(b.id).arg(b.params.value(7).trimmed()));
+                }
                 bool okEps = false;
-                const double add = evalOr(ctx, b.line, QStringLiteral("eps в сечении входа"),
+                const double add = evalOr(ctx, b.line, tpl::tr("eps в сечении входа",
+                                                               "eps in the port cross-section"),
                                           b.params.value(7), angle, 0.0, &okEps);
                 if (okEps) {
                     p.eps = add + 1.0;
                     if (p.eps <= 0.0) {
-                        ctx.warn(b.line, QStringLiteral("BLOCK %1: eps в сечении входа = %2 — "
-                                                        "ядро такой файл не примет")
+                        ctx.warn(b.line, tpl::tr("BLOCK %1: eps в сечении входа = %2 — "
+                                                 "ядро такой файл не примет",
+                                                 "BLOCK %1: eps in the port cross-section = %2 - "
+                                                 "the kernel will not accept such a file")
                                              .arg(b.id).arg(p.eps));
                     }
                 } else {
-                    ctx.warn(b.line, QStringLiteral("BLOCK %1: добавку eps «%2» вычислить не "
-                                                    "удалось — вход оставлен в вакууме")
+                    p.eps = 1.0;
+                    ctx.warn(b.line, tpl::tr("BLOCK %1: добавку eps «%2» вычислить не "
+                                             "удалось — вход оставлен в вакууме",
+                                             "BLOCK %1: the eps increment '%2' could not be "
+                                             "evaluated - the port is left in vacuum")
                                          .arg(b.id).arg(b.params.value(7).trimmed()));
                 }
             }
             if (b.params.size() > 8) {
-                ctx.warn(b.line, QStringLiteral("BLOCK %1: у входа больше восьми параметров — "
-                                                "лишние отброшены").arg(b.id));
+                ctx.warn(b.line, tpl::tr("BLOCK %1: у входа больше восьми параметров — "
+                                         "лишние отброшены",
+                                         "BLOCK %1: the port has more than eight parameters - the "
+                                         "extra ones are discarded").arg(b.id));
             }
             sm.ports << p;
             continue;
@@ -1606,13 +2052,17 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
         switch (b.prim) {
         case Prim::Rect: {
             s.kind = ShapeKind::Rectangle;
-            s.xMin = evalOr(ctx, b.line, QStringLiteral("X_min блока"), b.params.value(1), angle,
+            s.xMin = evalOr(ctx, b.line, tpl::tr("X_min блока",
+                                                 "block X_min"), b.params.value(1), angle,
                             0.0) * k + anchor.x();
-            s.xMax = evalOr(ctx, b.line, QStringLiteral("X_max блока"), b.params.value(2), angle,
+            s.xMax = evalOr(ctx, b.line, tpl::tr("X_max блока",
+                                                 "block X_max"), b.params.value(2), angle,
                             0.0) * k + anchor.x();
-            s.yMin = evalOr(ctx, b.line, QStringLiteral("Y_min блока"), b.params.value(3), angle,
+            s.yMin = evalOr(ctx, b.line, tpl::tr("Y_min блока",
+                                                 "block Y_min"), b.params.value(3), angle,
                             0.0) * k + anchor.y();
-            s.yMax = evalOr(ctx, b.line, QStringLiteral("Y_max блока"), b.params.value(4), angle,
+            s.yMax = evalOr(ctx, b.line, tpl::tr("Y_max блока",
+                                                 "block Y_max"), b.params.value(4), angle,
                             0.0) * k + anchor.y();
             if (b.moving) {
                 s.vx = evalOr(ctx, b.line, QStringLiteral("Vx"), b.params.value(5), angle, 0.0);
@@ -1636,9 +2086,11 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
         }
         case Prim::Polygon: {
             for (const auto &pt : b.points) {
-                const double x = evalOr(ctx, b.line, QStringLiteral("X вершины"), pt.first, angle,
+                const double x = evalOr(ctx, b.line, tpl::tr("X вершины",
+                                                             "vertex X"), pt.first, angle,
                                         0.0) * k + anchor.x();
-                const double y = evalOr(ctx, b.line, QStringLiteral("Y вершины"), pt.second, angle,
+                const double y = evalOr(ctx, b.line, tpl::tr("Y вершины",
+                                                             "vertex Y"), pt.second, angle,
                                         0.0) * k + anchor.y();
                 s.points << QPointF(x, y);
             }
@@ -1660,7 +2112,8 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
                 s.kind = ShapeKind::Polygon;  // выражение ядро замыкает само
             }
             if (s.points.size() < 2)
-                ctx.warn(b.line, QStringLiteral("BLOCK %1: у полигона меньше двух вершин").arg(b.id));
+                ctx.warn(b.line, tpl::tr("BLOCK %1: у полигона меньше двух вершин",
+                                         "BLOCK %1: the polygon has fewer than two vertices").arg(b.id));
             break;
         }
         default:
@@ -1692,7 +2145,7 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
         }
 
         // Три плазменных примитива одной области — одна фигура модели.
-        if (s.plasma.any() && mergePlasmaInto(&sm.shapes, s))
+        if (s.plasma.any() && mergePlasmaInto(&sm.shapes, s, step.parm.delta))
             continue;
 
         sm.shapes << s;
@@ -1703,6 +2156,8 @@ StepModel buildStep(const Ctx &ctx, const RawStep &step)
 
 /// Убирает хвост шага углового свипа: `_ref` у опорного шага, `_a30`/`_a12p5`/`_am15`
 /// у шагов с повёрнутым объектом (см. `sweepFileTag`).
+/// @param[in] name  имя файла из `#OUTPUT`
+/// @return Имя без хвоста свипа.
 QString stripSweepSuffix(const QString &name)
 {
     static const QRegularExpression re(QStringLiteral("_(ref|am?[0-9p]+)$"));
@@ -1716,6 +2171,9 @@ QString stripSweepSuffix(const QString &name)
 /// выражением по виду «подчёркивание, f, цифры» тут обойтись нельзя: авторский файл
 /// вполне может называться `wg_f30`, и тогда при первом же сохранении программа
 /// молча переименовала бы человеку выходные данные.
+/// @param[in] name     имя файла из `#OUTPUT`
+/// @param[in] freqGhz  частота шага, ГГц; <= 0 — имя не меняется
+/// @return Имя без хвоста `_<freqFileTag(freqGhz)>`, если он есть.
 QString stripFreqSuffix(const QString &name, double freqGhz)
 {
     if (freqGhz <= 0.0)
@@ -1725,6 +2183,8 @@ QString stripFreqSuffix(const QString &name, double freqGhz)
 }
 
 /// Убирает хвост `_p<N>` — так эмиттер помечает файлы разных возбуждений.
+/// @param[in] name  имя файла
+/// @return Имя без хвоста `_p<число>`.
 QString stripExciterSuffix(const QString &name)
 {
     static const QRegularExpression re(QStringLiteral("_p\\d+$"));
@@ -1732,6 +2192,9 @@ QString stripExciterSuffix(const QString &name)
     return s.remove(re);
 }
 
+/// @brief Возвращает общее начало всех строк списка.
+/// @param[in] list  строки
+/// @return Наибольший общий префикс; пусто для пустого списка.
 QString commonPrefix(const QStringList &list)
 {
     if (list.isEmpty())
@@ -1778,6 +2241,8 @@ PreprocessResult preprocess(const QString &text, const QString &baseDir)
 ///
 /// Номер, записанный выражением (в макро-теле он бывает параметром), пропускаем:
 /// сопоставить такую подпись фигуре нечем, а гадать нельзя.
+/// @param[in] text  исходный текст задания или включаемого файла (до препроцессора)
+/// @return Имена фигур и портов по номеру блока (без пояснения после « — » / « -- »).
 QHash<int, QString> collectBlockLabels(const QString &text)
 {
     // Пробелы ищем БЕЗ перевода строки ([^\S\n]), иначе `\s*` перепрыгивает на
@@ -1803,7 +2268,12 @@ QHash<int, QString> collectBlockLabels(const QString &text)
         // плазма, активен ли вход). Забрать нужно ТОЛЬКО имя: иначе пояснение
         // прилипнет к имени, а при следующем сохранении к нему допишется новое —
         // и подпись будет разрастаться с каждым циклом «открыл-сохранил».
-        const int dash = label.indexOf(QStringLiteral(" — "));
+        // Разделитель зависит от языка, на котором файл записан: русский эмиттер ставит
+        // « — », английский — « -- » (в английском тексте задания только ASCII).
+        // Читаем оба независимо от текущего языка.
+        int dash = label.indexOf(QStringLiteral(" — "));
+        if (dash <= 0)
+            dash = label.indexOf(QLatin1String(" -- "));
         if (dash > 0)
             label.truncate(dash);
         label = label.trimmed();
@@ -1817,11 +2287,16 @@ namespace {
 
 /// Имена вариантов из комментариев эмиттера, по порядку и без повторов:
 ///     ! ===== вариант: пустой, FREQ = 3.0 ГГц =====        (явный шаг)
-///     ! вариант: пустой, возбуждён вход 1                   (перед #define макроса)
+///     ! вариант: пустой, возбуждён вход 1                   (перед `#define` макроса)
+/// Файл, записанный по-английски, несёт те же строки как «variant: …, excited port 1» —
+/// понимаем оба языка, какой бы язык ни был включён сейчас.
+/// @param[in] text  исходный текст задания или включаемого файла
+/// @return Имена вариантов в порядке первого появления.
 QStringList collectVariantTitles(const QString &text)
 {
     static const QRegularExpression re(
-        QStringLiteral("^[^\\S\\n]*!.*?вариант: (.+?)(?:, возбуждён.*|, FREQ.*|[^\\S\\n]*=====.*)?[^\\S\\n]*$"),
+        QStringLiteral("^[^\\S\\n]*!.*?(?:вариант|variant): (.+?)"
+                       "(?:, возбуждён.*|, excited.*|, FREQ.*|[^\\S\\n]*=====.*)?[^\\S\\n]*$"),
         QRegularExpression::MultilineOption);
     QStringList out;
     QRegularExpressionMatchIterator it = re.globalMatch(text);
@@ -1840,18 +2315,28 @@ QStringList collectVariantTitles(const QString &text)
 ///     ! Ядро: tmc_rth (H-мода)
 ///
 /// Чужие файлы такой шапки не имеют, и описания у них нет — это нормально.
+/// Шапка английского файла: «! Task generated by TPL Designer.» … «! Kernel: …» —
+/// узнаём оба варианта независимо от текущего языка.
+/// @param[in] src  исходный текст задания
+/// @return Описание (строки без `! `); пусто — шапки этой программы нет в первых
+///         шести строках.
 QString readOwnDescription(const QString &src)
 {
     const QStringList lines = src.split(QLatin1Char('\n'));
+    const auto isOwnHeader = [](const QString &l) {
+        return l.startsWith(QStringLiteral("! Задание сгенерировано TPL Designer"))
+               || l.startsWith(QLatin1String("! Task generated by TPL Designer"));
+    };
     int i = 0;
-    while (i < lines.size() && !lines.at(i).startsWith(QStringLiteral("! Задание сгенерировано TPL Designer")))
+    while (i < lines.size() && !isOwnHeader(lines.at(i)))
         ++i;
     if (i >= lines.size() || i > 5)
         return {};
     QStringList out;
     for (++i; i < lines.size(); ++i) {
         const QString &l = lines.at(i);
-        if (!l.startsWith(QLatin1Char('!')) || l.startsWith(QStringLiteral("! Ядро:")))
+        if (!l.startsWith(QLatin1Char('!')) || l.startsWith(QStringLiteral("! Ядро:"))
+            || l.startsWith(QLatin1String("! Kernel:")))
             break;
         QString t = l.mid(1);
         if (t.startsWith(QLatin1Char(' ')))
@@ -1863,13 +2348,22 @@ QString readOwnDescription(const QString &src)
 
 /// Служебная строка углового свипа (см. `sweepHeader` в emitter.cpp).
 struct SweepMarker {
+    /// Строка найдена, и в ней есть и блоки, и углы.
     bool valid = false;
+    /// Номера блоков поворачиваемых фигур.
     QSet<int> blocks;
+    /// Ось поворота, мм.
     QPointF pivot;
+    /// Углы шагов, градусы, в порядке шагов.
     QVector<double> angles;
+    /// Первый шаг — опорный (без объекта).
     bool ref = false;
 };
 
+/// @brief Ищет в тексте служебную строку `! @TPLD-SWEEP ...` и разбирает её.
+/// @param[in] src  исходный текст задания
+/// @return Разобранная строка; `valid == false` — строки нет или она неполна.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#sweep
 SweepMarker readSweepMarker(const QString &src)
 {
     SweepMarker m;
@@ -1897,6 +2391,8 @@ SweepMarker readSweepMarker(const QString &src)
 /// Мельче нанометра — намеренно: эмиттер пишет смещение от оси десятью значащими
 /// цифрами (0.9711089277), и грубое округление съедало бы десятую цифру — повторная
 /// запись отличалась бы от исходной (найдено тестом на профиле крыла).
+/// @param[in] v  координата, мм (или угол, рад)
+/// @return Значение, округлённое до 1e-11, без отрицательного нуля.
 double snapNm(double v)
 {
     const double r = std::round(v * 1e11) / 1e11;
@@ -1908,6 +2404,11 @@ double snapNm(double v)
 /// Повёрнутый прямоугольник эмиттер пишет полигоном из четырёх углов; вернувшись
 /// в исходное положение, он снова лежит по осям — и снова становится прямоугольником,
 /// иначе круговорот «записал — прочитал» превращал бы каждый прямоугольник в контур.
+/// @param[in] s         фигура, прочитанная из шага свипа
+/// @param[in] pivot     ось поворота, мм
+/// @param[in] angleDeg  угол этого шага, градусы
+/// @return Фигура, повёрнутая на -angleDeg; четырёхугольник, лёгший по осям, снова
+///         становится прямоугольником.
 Shape unrotateShape(const Shape &s, const QPointF &pivot, double angleDeg)
 {
     Shape r = rotatedShape(s, pivot, -angleDeg);
@@ -1949,7 +2450,11 @@ Shape unrotateShape(const Shape &s, const QPointF &pivot, double angleDeg)
 
 } // namespace
 
-ReadResult readTplText(const QString &text, const QString &baseDir)
+// Этапы: препроцессор -> подписи блоков и имена вариантов из исходного текста ->
+// разбор шагов -> модели шагов -> разворот свипа -> склейка одинаковых фигур и
+// портов -> частоты, возбуждения, варианты -> выходные файлы -> eps входов ->
+// сверка числа шагов при обратной записи.
+ReadResult readTplText(const QString &text, const QString &baseDir, bool unitsFirst)
 {
     ReadResult r;
 
@@ -1993,24 +2498,31 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
     ctx.warnings = &r.warnings;
     ctx.errors = &r.errors;
     ctx.baseDir = baseDir;
+    ctx.unitsFirst = unitsFirst;
+    ctx.unitAfterValue = &r.unitAfterValueLines;
 
     bool sawHeader = false;
     bool sawEof = false;
     const QVector<RawStep> raw = parseSteps(ctx, pp.text, &sawHeader, &sawEof);
 
     if (!sawHeader) {
-        r.errors << QStringLiteral("это не файл задания .tpl: нет заголовка #TMC_RT_H");
+        r.errors << tpl::tr("это не файл задания .tpl: нет заголовка #TMC_RT_H",
+                            "this is not a .tpl task file: no #TMC_RT_H header");
         return r;
     }
     if (!sawEof)
-        r.warnings << QStringLiteral("в файле нет #EOF — ядро такой файл не примет");
+        r.warnings << tpl::tr("в файле нет #EOF — ядро такой файл не примет",
+                              "the file has no #EOF - the kernel will not accept such a file");
     if (raw.isEmpty()) {
-        r.errors << QStringLiteral("в задании нет ни одного #STEP — считать нечего");
+        r.errors << tpl::tr("в задании нет ни одного #STEP — считать нечего",
+                            "the task has no #STEP - nothing to compute");
         return r;
     }
     if (!raw.first().parm.haveTimeUnit) {
-        r.warnings << QStringLiteral("TIME_UNIT не задан. Ядро по умолчанию понимает секунды, "
-                                     "редактор принял наносекунды — проверьте время счёта");
+        r.warnings << tpl::tr("TIME_UNIT не задан. Ядро по умолчанию понимает секунды, "
+                              "редактор принял наносекунды — проверьте время счёта",
+                              "TIME_UNIT is not set. By default the kernel assumes seconds, the "
+                              "editor assumed nanoseconds - check the run time");
     }
 
     // --- параметры задания берём из первого шага ---
@@ -2021,8 +2533,10 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
     prj.timeMax = p0.timeMax;
     prj.unit = p0.lengthUnit;
     if (std::fabs(p0.timeMin) > 1e-9) {
-        r.warnings << QStringLiteral("начало счёта TIME = %1 нс не равно нулю — модель хранит "
-                                     "только конец счёта").arg(num(p0.timeMin));
+        r.warnings << tpl::tr("начало счёта TIME = %1 нс не равно нулю — модель хранит "
+                              "только конец счёта",
+                              "the start of the run TIME = %1 ns is not zero - the model stores "
+                              "only the end of the run").arg(num(p0.timeMin));
     }
 
     // --- разбираем шаги ---
@@ -2039,9 +2553,12 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
             || std::fabs(b.yMin - prj.box.yMin) > 1e-9 || std::fabs(b.yMax - prj.box.yMax) > 1e-9
             || std::fabs(s.parm.delta - prj.delta) > 1e-9
             || std::fabs(s.parm.timeMax - prj.timeMax) > 1e-9) {
-            r.warnings << QStringLiteral("шаг в строке %1 считает другую область или другой шаг "
-                                         "сетки — модель хранит одну коробку на всё задание, "
-                                         "взяты параметры первого шага").arg(s.line);
+            r.warnings << tpl::tr("шаг в строке %1 считает другую область или другой шаг "
+                                  "сетки — модель хранит одну коробку на всё задание, "
+                                  "взяты параметры первого шага",
+                                  "the step at line %1 computes a different domain or a different "
+                                  "grid step - the model stores one box for the whole task, the "
+                                  "parameters of the first step are taken").arg(s.line);
         }
     }
     prj.kernel = anyPlasma ? Kernel::X : Kernel::H;
@@ -2067,9 +2584,12 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
                 }
             }
         } else {
-            r.warnings << QStringLiteral("в шапке записан поворот объекта на %1 углов, а шагов в "
-                                         "файле %2 — поворот не восстановлен, шаги прочитаны "
-                                         "как есть")
+            r.warnings << tpl::tr("в шапке записан поворот объекта на %1 углов, а шагов в "
+                                  "файле %2 — поворот не восстановлен, шаги прочитаны "
+                                  "как есть",
+                                  "the header records an object rotation by %1 angles, but the "
+                                  "file has %2 steps - the rotation is not restored, the steps "
+                                  "are read as they are")
                               .arg(sweep.angles.size()).arg(steps.size());
         }
     }
@@ -2123,7 +2643,7 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
                 // моменту мог смениться из-за столкновения номеров.
                 copy.name = labels.value(s.id);
                 if (copy.name.isEmpty())
-                    copy.name = QStringLiteral("фигура %1").arg(s.id);
+                    copy.name = tpl::tr("фигура %1", "shape %1").arg(s.id);
                 const int pos = after + 1;
                 for (auto it = shapeByKey.begin(); it != shapeByKey.end(); ++it) {
                     if (it.value() >= pos)
@@ -2155,7 +2675,7 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
                 reserve(copy.id);
                 copy.name = labels.value(p.id);
                 if (copy.name.isEmpty())
-                    copy.name = QStringLiteral("вход %1").arg(prj.ports.size() + 1);
+                    copy.name = tpl::tr("вход %1", "port %1").arg(prj.ports.size() + 1);
                 portByKey.insert(key, prj.ports.size());
                 prj.ports << copy;
             }
@@ -2169,17 +2689,23 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
         QList<int> ids = renamedShapes.keys();
         std::sort(ids.begin(), ids.end());
         for (int id : ids) {
-            r.warnings << QStringLiteral("номер блока %1 занят %2 разными фигурами — всем, кроме "
-                                         "первой, выданы свободные номера. На расчёт это не "
-                                         "влияет: номер блока произвольный, важна лишь "
-                                         "уникальность")
+            r.warnings << tpl::tr("номер блока %1 занят %2 разными фигурами — всем, кроме "
+                                  "первой, выданы свободные номера. На расчёт это не "
+                                  "влияет: номер блока произвольный, важна лишь "
+                                  "уникальность",
+                                  "block number %1 is used by %2 different shapes - all but the "
+                                  "first were given free numbers. This does not affect the "
+                                  "computation: the block number is arbitrary, only uniqueness "
+                                  "matters")
                               .arg(id).arg(renamedShapes.value(id) + 1);
         }
         ids = renamedPorts.keys();
         std::sort(ids.begin(), ids.end());
         for (int id : ids) {
-            r.warnings << QStringLiteral("номер блока %1 занят и фигурой, и входом (%2 раза) — "
-                                         "входу выдан свободный номер")
+            r.warnings << tpl::tr("номер блока %1 занят и фигурой, и входом (%2 раза) — "
+                                  "входу выдан свободный номер",
+                                  "block number %1 is used both by a shape and by a port (%2 "
+                                  "times) - the port was given a free number")
                               .arg(id).arg(renamedPorts.value(id));
         }
     }
@@ -2216,9 +2742,12 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
             for (const QVector<int> &set : activeSets)
                 prj.exciters << set.first();
         } else {
-            r.warnings << QStringLiteral("шаги отличаются набором активных входов, но не по одному "
-                                         "входу на шаг — очередь возбуждений не восстановлена, "
-                                         "взят первый шаг");
+            r.warnings << tpl::tr("шаги отличаются набором активных входов, но не по одному "
+                                  "входу на шаг — очередь возбуждений не восстановлена, "
+                                  "взят первый шаг",
+                                  "the steps differ in the set of active ports, but not one port "
+                                  "per step - the excitation queue is not restored, the first "
+                                  "step is taken");
         }
     }
 
@@ -2306,9 +2835,12 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
             tags.clear();
             for (int i = 0; i < shapeSets.size(); ++i)
                 tags << QStringLiteral("v%1").arg(i + 1);
-            r.warnings << QStringLiteral("шаги считают разные наборы фигур; имена файлов не дают "
-                                         "понять, как называются варианты — им выданы метки v1, "
-                                         "v2, …");
+            r.warnings << tpl::tr("шаги считают разные наборы фигур; имена файлов не дают "
+                                  "понять, как называются варианты — им выданы метки v1, "
+                                  "v2, …",
+                                  "the steps compute different sets of shapes; the file names do "
+                                  "not tell what the variants are called - they were given the "
+                                  "labels v1, v2, ...");
         }
         baseSignal = base;
 
@@ -2356,8 +2888,11 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
         prj.output.fields = OutputSettings::Fields::AllSteps;  // опорный шаг полей не пишет
     else {
         prj.output.fields = OutputSettings::Fields::AllSteps;
-        r.warnings << QStringLiteral("поля выгружаются на %1 шагах из %2 — модель знает только "
-                                     "«нигде», «на первом» и «на всех», выбрано «на всех»")
+        r.warnings << tpl::tr("поля выгружаются на %1 шагах из %2 — модель знает только "
+                              "«нигде», «на первом» и «на всех», выбрано «на всех»",
+                              "fields are exported at %1 of %2 steps - the model knows only "
+                              "\"nowhere\", \"only at the first step\" and \"at every step\"; "
+                              "\"at every step\" is selected")
                           .arg(fieldsCount).arg(steps.size());
     }
 
@@ -2378,11 +2913,27 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
             prj.output.sMatrixFile = sCores.value(0);
         }
         for (const StepModel &s : steps) {
-            if (s.out.sMatrix) {
+            if (!s.out.sMatrix)
+                continue;
+            if (s.out.sNoWindow) {
+                // Окно на весь счёт: так по умолчанию пишет многочастотный режим.
+                prj.output.sMatrixLimitWideband = false;
+                if (!hasFileSignal(prj)) {
+                    r.warnings << tpl::tr("SMATRIX без окна T_min; T_max законен только "
+                                          "при входе с файлом сигнала — в одночастотном "
+                                          "режиме ядро такой шаг отвергнет. При сохранении "
+                                          "будет записано окно со страницы «Вывод данных»",
+                                          "SMATRIX without a T_min; T_max window is valid only "
+                                          "for a port with a signal file - in single-frequency "
+                                          "mode the kernel will reject such a step. When saving, "
+                                          "the window from the \"Output\" page will be written");
+                }
+            } else {
                 prj.output.sMatrixTMin = s.out.sTMin;
                 prj.output.sMatrixTMax = s.out.sTMax;
-                break;
+                prj.output.sMatrixLimitWideband = true;
             }
+            break;
         }
     }
 
@@ -2411,21 +2962,52 @@ ReadResult readTplText(const QString &text, const QString &baseDir)
     }
 
     if (prj.output.signalFile.isEmpty())
-        r.warnings << QStringLiteral("в #OUTPUT не нашлось строки FILE — имя файла сигналов пусто");
+        r.warnings << tpl::tr("в #OUTPUT не нашлось строки FILE — имя файла сигналов пусто",
+                              "#OUTPUT has no FILE line - the signal file name is empty");
 
     prj.name = o0.file.isEmpty() ? QStringLiteral("task") : baseSignal;
 
+    // --- среда в сечении входов ---
+    //
+    // Восьмой параметр входа — Δε той среды, где он стоит (диссертация К. Н. Климова,
+    // (7.54)). Совпал со средой — вход «по среде», как и у нового задания. Задан другим
+    // числом — это решение автора задания, держим его руками. Пуст, а вход стоит в
+    // диэлектрике — это та самая ошибка, которую генератор закрывает: при сохранении
+    // будет записана добавка среды.
+    for (Port &port : prj.ports) {
+        const double medium = portMediumEps(prj, port);
+        if (std::isnan(port.eps)) {
+            port.eps = 1.0;
+            port.epsAuto = true;
+            if (medium != 1.0) {
+                r.warnings << tpl::tr("вход «%1» стоит в среде eps = %2, а параметр W "
+                                      "(добавка eps-1) в файле пуст — вход согласован с "
+                                      "вакуумом. При сохранении будет записана добавка "
+                                      "%3",
+                                      "port '%1' is in a medium with eps = %2, but the W "
+                                      "parameter (eps-1 increment) in the file is empty - the "
+                                      "port is matched to vacuum. When saving, the increment %3 "
+                                      "will be written")
+                                  .arg(port.name).arg(medium).arg(medium - 1.0);
+            }
+        } else {
+            port.epsAuto = std::fabs(port.eps - medium) < 1e-9;
+        }
+    }
+
     // --- сверка: сколько шагов должно получиться при обратной записи ---
     if (prj.stepCount() != steps.size()) {
-        r.warnings << QStringLiteral("в файле %1 шагов, а из разобранной модели получится %2 — "
-                                     "часть различий между шагами модель не выражает")
+        r.warnings << tpl::tr("в файле %1 шагов, а из разобранной модели получится %2 — "
+                              "часть различий между шагами модель не выражает",
+                              "the file has %1 steps, but the parsed model will give %2 - the "
+                              "model cannot express some of the differences between the steps")
                           .arg(steps.size()).arg(prj.stepCount());
     }
 
     return r;
 }
 
-ReadResult readTplFile(const QString &path)
+ReadResult readTplFile(const QString &path, bool unitsFirst)
 {
     ReadResult r;
     const QFileInfo fi(path);
@@ -2437,7 +3019,7 @@ ReadResult readTplFile(const QString &path)
         return r;
     }
 
-    r = readTplText(text, fi.absolutePath());
+    r = readTplText(text, fi.absolutePath(), unitsFirst);
     if (r.ok() || !r.project.name.isEmpty())
         r.project.name = fi.completeBaseName();
     return r;

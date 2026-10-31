@@ -1,6 +1,13 @@
+/// @file kit.cpp
+/// @brief Реализация сборщика задания `kit::Builder` и правил шага, времени и чисел паспорта.
+///
+/// Часть модуля «Ядро TPL Designer», каталог образцов. Описание функций — в `kit.h`.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#samples
 #include "kit.h"
 
+#include "lang.h"
 #include "physics.h"
+#include "placement.h"
 
 #include <algorithm>
 #include <cmath>
@@ -95,16 +102,10 @@ Port &Builder::port(const QString &name, PortSide side, double from, double to, 
 void Builder::guideX(const QString &name, double x0, double x1, double ylo, double yhi)
 {
     const double d = p.delta;
-    rect(name + QStringLiteral(": нижняя стенка"), Material::Metal, x0, x1, ylo - d, ylo);
-    rect(name + QStringLiteral(": верхняя стенка"), Material::Metal, x0, x1, yhi, yhi + d);
+    rect(name + tpl::tr(": нижняя стенка", ": bottom wall"), Material::Metal, x0, x1, ylo - d, ylo);
+    rect(name + tpl::tr(": верхняя стенка", ": top wall"), Material::Metal, x0, x1, yhi, yhi + d);
 }
 
-void Builder::guideY(const QString &name, double y0, double y1, double xlo, double xhi)
-{
-    const double d = p.delta;
-    rect(name + QStringLiteral(": левая стенка"), Material::Metal, xlo - d, xlo, y0, y1);
-    rect(name + QStringLiteral(": правая стенка"), Material::Metal, xhi, xhi + d, y0, y1);
-}
 
 void Builder::absorberFrame(bool left, bool right, bool bottom, bool top, int cells)
 {
@@ -114,17 +115,17 @@ void Builder::absorberFrame(bool left, bool right, bool bottom, bool top, int ce
     const Box &b = p.box;
     const double t = cells * p.delta;
     if (right)
-        rect(QStringLiteral("поглотитель справа"), Material::Absorber, b.xMax - t, b.xMax, b.yMin,
+        rect(tpl::tr("поглотитель справа", "absorber right"), Material::Absorber, b.xMax - t, b.xMax, b.yMin,
              b.yMax);
     if (left)
-        rect(QStringLiteral("поглотитель слева"), Material::Absorber, b.xMin, b.xMin + t, b.yMin,
+        rect(tpl::tr("поглотитель слева", "absorber left"), Material::Absorber, b.xMin, b.xMin + t, b.yMin,
              b.yMax);
     const double x0 = left ? b.xMin + t : b.xMin;
     const double x1 = right ? b.xMax - t : b.xMax;
     if (bottom)
-        rect(QStringLiteral("поглотитель снизу"), Material::Absorber, x0, x1, b.yMin, b.yMin + t);
+        rect(tpl::tr("поглотитель снизу", "absorber bottom"), Material::Absorber, x0, x1, b.yMin, b.yMin + t);
     if (top)
-        rect(QStringLiteral("поглотитель сверху"), Material::Absorber, x0, x1, b.yMax - t, b.yMax);
+        rect(tpl::tr("поглотитель сверху", "absorber top"), Material::Absorber, x0, x1, b.yMax - t, b.yMax);
 }
 
 void Builder::freqs(double lo, double hi, int n)
@@ -162,6 +163,12 @@ void Builder::time(double tNs)
 
 Build Builder::done(QVector<Row> theory, QStringList notes)
 {
+    // Окно ДН «до конца счёта» ядро не закроет: оно дотягивает окно до целого числа
+    // периодов и при конце не раньше TIME файлов ДН не пишет (Б-13). Частоты к этому
+    // месту уже известны — подрезаем окно на период самой низкой из них.
+    if (p.output.directionalPattern)
+        p.output.patternTMax = patternWindowSafeEnd(p, p.output.patternTMin, p.output.patternTMax);
+
     Build b;
     b.project = p;
     b.theory = std::move(theory);
@@ -213,13 +220,13 @@ QString num(double v, int digits)
     return s;
 }
 
-QString ghz(double v) { return num(v, 4) + QStringLiteral(" ГГц"); }
-QString mm(double v) { return num(v, 4) + QStringLiteral(" мм"); }
+QString ghz(double v) { return num(v, 4) + tpl::tr(" ГГц", " GHz"); }
+QString mm(double v) { return num(v, 4) + tpl::tr(" мм", " mm"); }
 
 QString db(double mag)
 {
     return QString::number(20.0 * std::log10(std::max(mag, 1e-12)), 'f', 1)
-           + QStringLiteral(" дБ");
+           + tpl::tr(" дБ", " dB");
 }
 
 QVector<double> band(double lo, double hi, int n)

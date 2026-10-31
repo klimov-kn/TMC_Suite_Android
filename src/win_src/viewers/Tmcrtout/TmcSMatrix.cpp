@@ -1,18 +1,17 @@
 // TmcSMatrix.cpp : implementation file
 //
 
-#include "StdAfx.h"
-#include "TMCGROUT.h"
-#include <Tmcgrviw.h>
-#include <Proc_s.h>
-#include <S_file.h>
-#include <TmcSMatrix.h>
+/// @file tmcsmatrix.cpp
+/// @brief Реализация `CTmcSMatrix`: чтение отсчётов `.t`, восстановление комплексных амплитуд по парам отсчётов, нормировка, запись столбца в `.s`.
+///
+/// Часть модуля «Вьювер TMCROS»; тот же файл собирается в библиотеки ядер
+/// `planarrt_h_ttos`, `planarrt_x_ttos`. Объявление — в общем `src/Include/tmcsmatrix.h`.
+/// @see https://www.tamic.ru/docs/code/tmcros.html#ttos-harmonic
+#include <tmcgrviw.h>
+#include <proc_s.h>
+#include <s_file.h>
+#include <tmcsmatrix.h>
 
-#ifdef _DEBUG
-#define new DEBUG_NEW
-#undef THIS_FILE
-static char THIS_FILE[] = __FILE__;
-#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // CTmcSMatrix
@@ -50,6 +49,7 @@ void CTmcSMatrix::DeleteData()
 	csTFileName.Format("");
 	csSFileName.Format("");
 	csError.Format("No error");
+	csWarning.Format("");	// B-3.3
 	dTmin = 0.0;
 	dTmax = 0.0;
 	dFreq = 0.0;
@@ -88,21 +88,23 @@ CString & CTmcSMatrix::GetErrorMessage()
 	return csError;
 }
 
-void CTmcSMatrix::Save(CString csSFileName1)
-{
-	if( IsError() ) return;
-	
-	csSFileName.Format("%s", csSFileName1);
-	Save();
-
-	return;
-}
 
 void CTmcSMatrix::Save(CString csSFileName1, double dFreq1)
 {
 	if( IsError() ) return;
 	
 	csSFileName.Format("%s", csSFileName1);
+	// I-27 (K-6): the point is written under dFreq1, but S is calculated at FREQ of the .t - a warning on mismatch
+	/// I-27: частота записи отличается от частоты расчёта из `.t` больше чем на 1e-5 (отн.: в .t частота записана %lg — 6 знаков) — предупреждение.
+	if( ( dFreq > 0.0 )&&( fabs( dFreq1 - dFreq ) > 1e-5*dFreq ) )
+	{
+		CString csW;
+		csW.Format( "S of file {%s} is calculated at FREQ = %lg Hz of the .t, but is written under the frequency "
+			"%lg Hz (the X value of the row); if X is a frequency, put the FREQ of the task there",
+			(LPCSTR)csTFileName, dFreq, dFreq1 );
+		if( csWarning.GetLength() > 0 ) csWarning += "; ";
+		csWarning += csW;
+	};
 	dFreq = dFreq1;
 	Save();
 
@@ -188,7 +190,7 @@ int CTmcSMatrix::CalcNPoint()
 	if( (fp = fopen( csTFileName, "r")) == NULL ) 
 	{
 		char szBuf[TMC_GROUT_MAXSTRING_BUF];
-		sprintf(szBuf, "Can't open file {%s}", (LPCTSTR)csTFileName);
+		sprintf( szBuf, "Can't open file {%s}", (LPCTSTR)csTFileName);	// A-26
 		PutErrorMessage(szBuf);
 		return 0;
 	};
@@ -204,6 +206,7 @@ int CTmcSMatrix::CalcNPoint()
 			r = gets_f1(ch);
 			if( (r <= dTmax)&&(r >= dTmin) ) i++;
 		};
+		// Частота расчёта: последняя строка #TMC_GROTS_Freq файла (ядро пишет одну).
 		if( strncmp( ch, TMC_GROTS_FLOUTFreq_ID, strlen(TMC_GROTS_FLOUTFreq_ID) ) == 0 )
 		{
 			sscanf( ch + strlen(TMC_GROTS_FLOUTFreq_ID), "%lg", &dFreq);
@@ -232,7 +235,7 @@ int CTmcSMatrix::CalcNInput()
 	if( (fp = fopen( csTFileName, "r")) == NULL ) 
 	{
 		char szBuf[TMC_GROUT_MAXSTRING_BUF];
-		sprintf(szBuf, "Can't open file {%s}", (LPCTSTR)csTFileName);
+		sprintf( szBuf, "Can't open file {%s}", (LPCTSTR)csTFileName);	// A-26
 		PutErrorMessage(szBuf);
 		return 0;
 	};
@@ -246,6 +249,7 @@ int CTmcSMatrix::CalcNInput()
 		{
 			i = gets_nNumbersInLine(ch);
 			fclose(fp);
+			// Номер такта и время, затем у каждого входа три числа: номер блока, Up, Uo.
 			i = (i - 2)/3;
 			if( i < 1 )
 			{
@@ -527,7 +531,7 @@ int CTmcSMatrix::skip_blank(char *ch)
 	if( IsError() ) return 0;
 
 	int i;
-	for( i = 0; ch[i] != '\0'; i++ )
+	for( i = 0; ch[i] != 0; i++ )
 	{
 		switch( ch[i] )
 		{
@@ -547,7 +551,7 @@ int CTmcSMatrix::skip_number(char *ch)
 	if( IsError() ) return 0;
 
 	int i;
-	for( i = 0; ch[i] != '\0'; i++ )
+	for( i = 0; ch[i] != 0; i++ )
 	{
 		switch( ch[i] )
 		{
@@ -566,9 +570,91 @@ void CTmcSMatrix::MakeSmatrix()
 {
 	if( IsError() ) return;
 
+	// 1. Комплексные амплитуды уходящих волн всех входов; 2. номер возбуждённого входа.
+	// 3. Деление на падающую волну возбуждённого входа и проверка на NaN/Inf — ниже.
 	AllocSArray();
 	TtoS();
 	SetnLineInSMatrix();
+
+	// B-3.1: S = Uo/Up - divide the column by the incident wave of the excited input (the same two-point
+	// estimate as for Uo, column 2*n of the .t). Old: S = Uo (true only for Amp = 1, Faza = 0); to return it,
+	// delete this block. |Up - 1| < 1e-3 is the noise of the 7 digits of the .t - not divided.
+	if( !IsError() )
+	{
+		int i, ii, n = nLineInSMatrix;
+		_complex scUp;
+		for( i = 1, ii = 0, scUp.x = 0.0, scUp.y = 0.0; i < nPoint; i++ )
+		{
+			// Up возбуждённого входа n — тем же способом, что Uo (по парам соседних отсчётов).
+			if( TtoSOneInputOnePoint( &scUp, pdTsignal[2*n+(i-1)*nInput*2], pdTime[i-1], pdTsignal[2*n+i*nInput*2], pdTime[i]) ) ii++;
+		};
+		if( ii > 0 )
+		{
+			scUp.x /= ii;
+			scUp.y /= ii;
+		};
+		double dUp2 = scUp.x*scUp.x + scUp.y*scUp.y;
+		if( ( ii == 0 )||( !( dUp2 > 1e-24 ) ) )
+		{
+			char szBuf[TMC_GROUT_MAXSTRING_BUF];
+			sprintf( szBuf, "No incident wave (Up) of the excited input %d in the window Tmin=%lg; Tmax=%lg in file {%s}",
+				n + 1, dTmin, dTmax, (LPCSTR)csTFileName );
+			PutErrorMessage(szBuf);
+			return;
+		};
+		// |Up - 1| >= 1e-3: S = Uo/Up (комплексное деление); иначе Up считается равной 1.
+		if( ( scUp.x - 1.0 )*( scUp.x - 1.0 ) + scUp.y*scUp.y >= 1e-6 )
+		{
+			for( i = 0; i < nInput; i++ )
+			{
+				double dRe = pcSmatrix[i].x, dIm = pcSmatrix[i].y;
+				pcSmatrix[i].x = ( dRe*scUp.x + dIm*scUp.y )/dUp2;
+				pcSmatrix[i].y = ( dIm*scUp.x - dRe*scUp.y )/dUp2;
+			};
+		};
+	};
+
+	// B-3.3 (author 29.10): pairs of zero samples in the window (the wave has not come yet) - a warning only,
+	// the average is not changed (they enter it as 0, see TtoSOneInputOnePoint).
+	/// Б-3.3: считаются пары соседних отсчётов, у которых оба значения равны 0, в столбцах Up и Uo
+	/// каждого входа; если такие есть — предупреждение с входом, где их больше всего.
+	if( !IsError() )
+	{
+		int n, i, k, nZero, nMax = 0, nInMax = 0, nInWith = 0;
+		for( n = 0; n < nInput; n++ )
+		{
+			for( k = 0, nZero = 0; k < 2; k++ )	// k = 0 - Up, 1 - Uo
+				for( i = 1; i < nPoint; i++ )
+					if( ( fabs( pdTsignal[k+2*n+(i-1)*nInput*2] ) < 10*DBL_MIN )&&( fabs( pdTsignal[k+2*n+i*nInput*2] ) < 10*DBL_MIN ) )
+					{
+						// Up of an input that is not excited is 0 everywhere - not counted
+						if( ( k == 0 )&&( n != nLineInSMatrix ) ) continue;
+						nZero++;
+					};
+			if( nZero > 0 ) nInWith++;
+			if( nZero > nMax ) { nMax = nZero; nInMax = n; };
+		};
+		if( nMax > 0 )
+			csWarning.Format( "the SMATRIX window Tmin=%lg; Tmax=%lg of file {%s} contains pairs of zero samples "
+				"(the wave has not come yet): %d of %d pairs at input %d (inputs with such pairs: %d). They enter the "
+				"average as 0 and decrease |S|; if this is not meant, move Tmin of SMATRIX to the steady state",
+				dTmin, dTmax, (LPCSTR)csTFileName, nMax, nPoint - 1, nInMax + 1, nInWith );
+	};
+
+	// D-1: S that is not a number (the field diverged) is an error - not NaN in the .s
+	if( !IsError() )
+	{
+		int i;
+		for( i = 0; i < nInput; i++ )
+		{
+			if( ( fabs( (double)pcSmatrix[i].x ) <= DBL_MAX )&&( fabs( (double)pcSmatrix[i].y ) <= DBL_MAX ) ) continue;
+			char szBuf[TMC_GROUT_MAXSTRING_BUF];
+			sprintf( szBuf, "S of input %d is not a number (NaN or Inf: the field of the calculation diverged) in file {%s}",
+				i + 1, (LPCSTR)csTFileName );
+			PutErrorMessage(szBuf);
+			return;
+		};
+	};
 
 	return;
 }
@@ -703,6 +789,7 @@ void CTmcSMatrix::TtoSOneInput(int n)
 
 	for( i = 1, ii = 0, scSFor2Point.x = 0.0, scSFor2Point.y = 0.0; i < nPoint; i++ )
 	{
+		// Пара соседних отсчётов уходящей волны Uo входа n (ячейка 1 + 2*n строки).
 		if( TtoSOneInputOnePoint( &scSFor2Point, pdTsignal[1+2*n+(i-1)*nInput*2], pdTime[i-1], pdTsignal[1+2*n+i*nInput*2], pdTime[i]) ) ii++;
 	};
 
@@ -714,6 +801,7 @@ void CTmcSMatrix::TtoSOneInput(int n)
 		return;
 	};
 
+	// Среднее по учтённым парам (пары из двух нулевых отсчётов тоже учтены с вкладом 0).
 	pcSmatrix[n].x = scSFor2Point.x/ii;
 	pcSmatrix[n].y = scSFor2Point.y/ii;
 
@@ -731,6 +819,9 @@ BOOL CTmcSMatrix::TtoSOneInputOnePoint(_complex *pscSFor2Point, double dTsignal1
 
 	double dFi, dwt1, dwt2, dAmpl, dsin1, dsin2, dcos1;
 
+	// Модель u(t) = A*sin(omega*t + phi). Из u1*sin(omega*t2 + phi) = u2*sin(omega*t1 + phi):
+	// cos(phi)*dsin1 + sin(phi)*dcos1 = 0, где dsin1 = u2*sin(omega*t1) - u1*sin(omega*t2),
+	// dcos1 = u2*cos(omega*t1) - u1*cos(omega*t2); отсюда tan(phi) = -dsin1/dcos1.
 	dwt1 = 2*3.141592653589*dFreq*dTime1;
 	dwt2 = 2*3.141592653589*dFreq*dTime2;
 	dsin1 = dTsignal2*sin( dwt1 ) - dTsignal1*sin( dwt2 );
@@ -748,10 +839,10 @@ BOOL CTmcSMatrix::TtoSOneInputOnePoint(_complex *pscSFor2Point, double dTsignal1
 	else
 	{
 		if( fabs(dcos1) < FLT_MIN ) return FALSE;
-//		dFi = asin(1/sqrt(1+(dcos1/dsin1)*(dcos1/dsin1)));
 		dFi = atan(-dsin1/dcos1);
 	};
 
+	// Амплитуда — по отсчёту с большим |sin(omega*t + phi)| (меньше ошибка деления).
 	dsin1 = sin( dwt1 + dFi );
 	dsin2 = sin( dwt2 + dFi );
 
@@ -769,6 +860,7 @@ BOOL CTmcSMatrix::TtoSOneInputOnePoint(_complex *pscSFor2Point, double dTsignal1
 		dAmpl = dTsignal2/dsin2;
 	};
 
+	// atan даёт phi с точностью до pi: отрицательная амплитуда — сдвиг фазы на -pi.
 	if( dAmpl < 0. )
 	{
 		dAmpl = -dAmpl;
@@ -880,6 +972,7 @@ BOOL CTmcSMatrix::IsInputExcite(int n)
 
 	for( i = 0; i < nPoint; i++ )
 	{
+		// Ячейка 2*n строки отсчёта — падающая волна Up входа n.
 		if( fabs( pdTsignal[2*n+(i)*nInput*2] ) > 10*DBL_MIN ) return TRUE;
 	};
 

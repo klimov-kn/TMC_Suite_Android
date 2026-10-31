@@ -19,16 +19,20 @@
 **
 */
 
+/// @file inte_ope.cpp
+/// @brief Операторы интерпретатора `return`, `if`, `while`: `inte_oper`, `inte_select_blanck`.
+/// @see https://www.tamic.ru/docs/code/lib-inter.html#operators
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
 
-#include <Typedef.h>
-#include <TMC_LIB.H>
-#include <INTER.H>
+#include <typedef.h>
+#include <tmc_lib.h>
+#include <inter.h>
 
+/// Таблица операторов: 0 — `return(`, 1 — `if(`, 2 — `while(`.
 INTE_OPER lpsOper[]=
                 {
 					{"return(", 7},
@@ -43,9 +47,8 @@ _real  inte_oper( char   *lex, int n )
 //  int i1;
   double d;
 
-//  printf("\nlex={%s}, n={%d}", lex, n);
-//  getch();
 
+  // return(e): значение e запоминается, код ERROR_RETURN прерывает разбор до inte_atof
   i = 0;
   if( strncmp( lpsOper[i].lpszName, lex, lpsOper[i].nLenght ) == 0)
   {
@@ -60,6 +63,7 @@ _real  inte_oper( char   *lex, int n )
   }
 
 
+  // if(c)S: S выполняется, если c >= 0; иначе результат — значение c
   i = 1;
   if( strncmp( lpsOper[i].lpszName, lex, lpsOper[i].nLenght ) == 0)
   {
@@ -72,6 +76,7 @@ _real  inte_oper( char   *lex, int n )
 	  return d;	  
   }
 
+  // while(c)S: S выполняется, пока c >= 0 (не более 10 000 000 раз)
   i = 2;
   if( strncmp( lpsOper[i].lpszName, lex, lpsOper[i].nLenght ) == 0)
   {
@@ -79,8 +84,10 @@ _real  inte_oper( char   *lex, int n )
 	  d = inte_inter( lex + lpsOper[i].nLenght, j - lpsOper[i].nLenght );
 	  if( expr_get_error_cod() != 0 ) return 0.;
 	  if( d < 0.0 ) return d;
+	  long nIter = 0;   // N-30: while(1) hung the kernel
 	  while( d >= 0.0 )
 	  {
+		  if( ++nIter > 10000000L ) { expr_set_error_cod( ERROR_EXPRESSION ); return 0.; }
 		  d = inte_inter( lex + j + 1, n - j - 1 );
 		  if( expr_get_error_cod() != 0 ) return 0.;
 		  d = inte_inter( lex + lpsOper[i].nLenght, j - lpsOper[i].nLenght );
@@ -103,8 +110,7 @@ int  inte_select_blanck( char   *lex, int n )
 	  switch(lex[i])
 	  {
 	  case ')': if( (j == 0)&&(j1 == 0) ) return i;
-		  else j++;
-		  break;
+		  else j++; break;
 	  case '(': j--; break;
 	  case '{': j1++; break;
 	  case '}': j1--; break;

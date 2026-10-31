@@ -133,28 +133,11 @@ Item {
         // Параметры для снимков применяются, когда файл прочитан.
         Timer { id: optionsTimer; interval: 50; onTriggered: { if (screen.chart && screen.chart.loading) restart(); else screen.applyOptions() } }
 
-        // Жесты: обработчики не двигают элемент (target: null), а передают изменения графику.
-        PinchHandler {
-            id: pinch
-            target: null
-            property real lastScale: 1
-            property point lastCentroid
-            onActiveChanged: { lastScale = 1; lastCentroid = centroid.position }
-            onActiveScaleChanged: {
-                if (!screen.chart || !active) return
-                screen.chart.zoomAt(activeScale / lastScale, centroid.position.x - chartLoader.x,
-                                    centroid.position.y - chartLoader.y)
-                lastScale = activeScale
-            }
-            onCentroidChanged: {
-                if (!screen.chart || !active) return
-                screen.chart.panBy(centroid.position.x - lastCentroid.x, centroid.position.y - lastCentroid.y)
-                lastCentroid = centroid.position
-            }
-        }
+        // Мышь на ПК. Касания разбирает сам график (ChartBase::touchEvent, src/ui/touchgesture.h).
         DragHandler {
             id: drag
             target: null
+            acceptedDevices: PointerDevice.Mouse
             property real lastX: 0
             property real lastY: 0
             onActiveChanged: { lastX = 0; lastY = 0 }
@@ -166,6 +149,7 @@ Item {
             }
         }
         TapHandler {
+            acceptedDevices: PointerDevice.Mouse
             onTapped: (point) => { if (screen.chart) screen.chart.pick(point.position.x - chartLoader.x, point.position.y - chartLoader.y) }
             onDoubleTapped: { if (screen.chart) { screen.chart.clearPick(); screen.chart.resetView() } }
         }

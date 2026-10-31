@@ -2,18 +2,20 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "STDAFX.H"
-#include <Tmcgrviw.h>
-#include <FieldIntegrated.h>
-//#include "TmcRTHRectNode.h"
-//#include "Pl_iofor.h"
+/// @file fieldintegrated.cpp
+/// @brief Накопление квадратур поля на частоте ДН, расчёт амплитуды и фазы,
+///        запись файла излучателей `.DAT` вдоль контура интегрирования.
+///
+/// Часть библиотеки TMCIndan. Реализует `CFieldIntegrated`: файловый режим
+/// (`.COS`/`.SIN` на диске), режим памяти по всей области и режим полос у контура
+/// (большие сетки и многочастотная ДН), формат файлов поля `#TMCGROFLD_*`.
+/// @see https://www.tamic.ru/docs/code/lib-tmcindan.html#field-integrated
+/// @see https://www.tamic.ru/docs/theory/radiation.html
+
+#include <tmcgrviw.h>
+#include <fieldintegrated.h>
 
 
-#ifdef _DEBUG
-#undef THIS_FILE
-static char THIS_FILE[]=__FILE__;
-#define new DEBUG_NEW
-#endif
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -100,6 +102,9 @@ void CFieldIntegrated::DeleteData()
 	bIsBeginIntegreted = FALSE;
 	bIsFieldDistribution = FALSE;
 	dT = 0.0;
+	nFreqNum = 0;			// A-41: toni i rezhim granicy ne nasleduyutsya sleduyushchim shagom
+	nFreqCur = 0;
+	bBorderOnly = FALSE;
 	dTmin = 0.0;
 	dTmax = 0.0;
 	dFreq = 0.0;
@@ -121,12 +126,6 @@ void CFieldIntegrated::DeleteData()
 	return;
 }
 
-void CFieldIntegrated::SetFile(CString csFile_ft, int nX1, int nY1)
-{
-	SetFile( csFile_ft );
-	SetnXnY( nX1, nY1 );
-	return;
-}
 
 void CFieldIntegrated::SetFile(CString csFile_ft)
 {
@@ -149,76 +148,6 @@ void CFieldIntegrated::SetFile(CString csFile_ft)
 	return;
 }
 
-CFieldIntegrated& CFieldIntegrated::operator=( CFieldIntegrated& cFieldIntegr )
-{
-	TmcIdx i, nNumNode;	// INT64
-	DeleteData();
-
-	dT = cFieldIntegr.dT;
-	dTmin = cFieldIntegr.dTmin;
-	dTmax = cFieldIntegr.dTmax;
-	dFreq = cFieldIntegr.dFreq;
-	nX = cFieldIntegr.nX;
-	nY = cFieldIntegr.nY;
-
-	dDirPatXmin = cFieldIntegr.dDirPatXmin;
-	dDirPatXmax = cFieldIntegr.dDirPatXmax;
-	dDirPatYmin = cFieldIntegr.dDirPatYmin;
-	dDirPatYmax = cFieldIntegr.dDirPatYmax;
-	
-	csFileSin  = cFieldIntegr.csFileSin;
-	csFileCos  = cFieldIntegr.csFileCos;
-	csFileFaza = cFieldIntegr.csFileFaza;
-	csFileAmplitude = cFieldIntegr.csFileAmplitude;
-	csFileDirectPattern = cFieldIntegr.csFileDirectPattern;
-
-	cParam = cFieldIntegr.cParam;
-	cError = cFieldIntegr.cError;
-
-	bIsFieldDistribution = cFieldIntegr.bIsFieldDistribution;
-	bIsBeginIntegreted   = cFieldIntegr.bIsBeginIntegreted;
-	bIsIntegretedInMemory = cFieldIntegr.bIsIntegretedInMemory;
-
-	if( (nX > 1)&&(nY > 1)&&(bIsIntegretedInMemory)&&(cFieldIntegr.prCos != NULL)&&(cFieldIntegr.prSin != NULL) )
-	{
-		if( prCos != NULL )
-		{
-			delete []prCos;
-			prCos = NULL;
-		};
-		
-		if( prSin != NULL )
-		{
-			delete []prSin;
-			prSin = NULL;
-		};
-
-		nNumNode = ((TmcIdx)nX)*nY;	// INT64
-		
-		if( ( prCos = new _real[ nNumNode ] ) == NULL )
-		{
-			cError.PutErrorMessage("Error when init array for Cos Field integrate");
-			return (*this);
-		};
-		if( ( prSin = new _real[ nNumNode ] ) == NULL )
-		{
-			if( prCos != NULL )
-			{
-				delete []prCos;
-				prCos = NULL;
-			};
-			cError.PutErrorMessage("Error when init array for Sin Field integrate");
-			return (*this);
-		};
-		for( i = 0; i < nNumNode; i++)
-		{
-			prCos[i] = cFieldIntegr.prCos[i];
-			prSin[i] = cFieldIntegr.prSin[i];
-		};
-	};
-
-	return (*this);
-}
 
 void CFieldIntegrated::SetnX(int nX1)
 {
@@ -266,10 +195,6 @@ void CFieldIntegrated::SetFreq(double dF)
 	return;
 }
 
-double CFieldIntegrated::GetFreq()
-{
-	return dFreq;
-}
 
 void CFieldIntegrated::SetTmin(double dTmin1)
 {
@@ -320,8 +245,29 @@ void CFieldIntegrated::InitAllFile( int nX1, int nY1, double dDelta1, double dXm
 	return;
 }
 
+// N-24: a file of the field distribution / directional pattern can't be opened - an error, not silence
+/// @brief Закрывает уже открытые файлы и записывает ошибку «не удалось открыть файл ДН».
+///
+/// Вызывается после ~2000 попыток открыть файл с паузой 10 мс (около 20 с).
+/// @param[in,out] cErr    объект ошибки, получает текст
+/// @param[in]     pszName имя файла, который не открылся
+/// @param[in]     f1      открытый ранее файл для закрытия (`NULL` — нет)
+/// @param[in]     f2      открытый ранее файл для закрытия (`NULL` — нет)
+/// @param[in]     f3      открытый ранее файл для закрытия (`NULL` — нет)
+static void TmcFieldOpenError( CTmcLibError &cErr, const char *pszName, FILE *f1 = NULL, FILE *f2 = NULL, FILE *f3 = NULL )
+{
+	CString cs;
+	if( f1 != NULL ) fclose( f1 );
+	if( f2 != NULL ) fclose( f2 );
+	if( f3 != NULL ) fclose( f3 );
+	cs.Format( "Can't open file %s of FIELD_DISTRIBUTION: the file is used by another program or the folder is read-only", pszName );
+	cErr.PutErrorMessage( cs );
+	return;
+}
+
 void CFieldIntegrated::InitFile(CString csFileName)
 {
+//		CString csBuf1;
 	if( IsError() ) return;
 	if( !bIsFieldDistribution ) return;
 	if( bIsIntegretedInMemory ) return;
@@ -338,9 +284,11 @@ void CFieldIntegrated::InitFile(CString csFileName)
 		return;
 	};
 
-	for( i = 0; ( fp = fopen( csFileName , "wb") ) == NULL; i++ ) 
+	// Формат файла поля: текстовый заголовок #TMCGROFLD_* (строки через CR LF),
+	// затем nY строк узлов, каждая — CR LF и nX двоичных значений _real.
+	for( i = 0; ( fp = fopen( csFileName , "wb") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileName ); return; };	// N-24
 		Sleep( 10 );
 	};
 	
@@ -365,7 +313,6 @@ void CFieldIntegrated::InitFile(CString csFileName)
 	};
 	
 	fclose(fp);
-	SetFileAttributes( csFileName, FILE_ATTRIBUTE_NORMAL );
 
 	return;
 
@@ -376,10 +323,6 @@ BOOL CFieldIntegrated::IsError()
 	return cError.IsError();
 }
 
-CString CFieldIntegrated::GetErrorMessage()
-{
-	return cError.GetErrorMessage();
-}
 
 
 CTmcLibError& CFieldIntegrated::GetError()
@@ -393,15 +336,15 @@ void CFieldIntegrated::AddPath(CString csPath)
 	
 	if( IsFullPath() ) return;
 
-	csBuf.Format("%s\\%s", csPath, csFileSin);
+	csBuf.Format("%s/%s", csPath, csFileSin);
 	csFileSin = csBuf;
-	csBuf.Format("%s\\%s", csPath, csFileCos);
+	csBuf.Format("%s/%s", csPath, csFileCos);
 	csFileCos = csBuf;
-	csBuf.Format("%s\\%s", csPath, csFileFaza);
+	csBuf.Format("%s/%s", csPath, csFileFaza);
 	csFileFaza = csBuf;
-	csBuf.Format("%s\\%s", csPath, csFileAmplitude);
+	csBuf.Format("%s/%s", csPath, csFileAmplitude);
 	csFileAmplitude = csBuf;
-	csBuf.Format("%s\\%s", csPath, csFileDirectPattern);
+	csBuf.Format("%s/%s", csPath, csFileDirectPattern);
 	csFileDirectPattern = csBuf;
 
 	return;
@@ -412,6 +355,7 @@ BOOL CFieldIntegrated::IsFullPath()
 	int i, n;
 
 	n = csFileAmplitude.GetLength();
+	if( ( n > 0 )&&( ( TMC_IS_SEP(csFileAmplitude[0]) )||( csFileAmplitude[0] == '/' ) ) ) return TRUE;	// N-22
 
 	for( i = 0; i < n; i++ )
 	{
@@ -429,6 +373,8 @@ void CFieldIntegrated::Integrate(double dTCurrent1, int nTCurrent1, _real *prUNo
 	dTCurrent = dTCurrent1;
 	nTCurrent = nTCurrent1;
 
+	// Окно [Tmin, Tmax]: вход в окно открывает накопление; первый шаг с t >= Tmax
+	// закрывает его и сразу строит амплитуду, фазу и файл излучателей.
 	if( bIsBeginIntegreted )
 	{
 		if( dTCurrent >= dTmax )
@@ -447,6 +393,7 @@ void CFieldIntegrated::Integrate(double dTCurrent1, int nTCurrent1, _real *prUNo
 		bIsBeginIntegreted = TRUE;
 	};
 
+	// Файловый режим (в режиме памяти эти вызовы сразу возвращаются).
 	Integrate( csFileCos, prUNode1, (_real)(cos(dTCurrent*2*3.141592653589*dFreq)) );
 	Integrate( csFileSin, prUNode1, (_real)(sin(dTCurrent*2*3.141592653589*dFreq)) );
 
@@ -486,9 +433,9 @@ void CFieldIntegrated::Integrate(CString csFileName, _real *prUNode1, _real r1)
 		return;
 	};
 
-	for( i = 0; ( fp = fopen( csFileName , "r+b") ) == NULL; i++ ) 
+	for( i = 0; ( fp = fopen( csFileName , "r+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileName ); return; };	// N-24
 		Sleep( 10 );
 	};
 	
@@ -503,6 +450,8 @@ void CFieldIntegrated::Integrate(CString csFileName, _real *prUNode1, _real r1)
 						TMC_GROFLD_DOCFILE_ID_TimeUnit, (LPCTSTR)cParam.csTimeUnit, cParam.rTimeUnit, 13, 10,
 						TMC_GROFLD_DOCFILE_ID_nX, nX, 13, 10,
 						TMC_GROFLD_DOCFILE_ID_nY, nY);
+	// Заголовок перезаписывается тем же текстом; затем каждое значение читается,
+	// увеличивается на U*r1*dT и записывается на то же место (чтение-запись по одному числу).
 	for( i = 0, ii = 0; i < nY; i++)
 	{
 		fprintf( fp, "%c%c", 13, 10);
@@ -511,9 +460,10 @@ void CFieldIntegrated::Integrate(CString csFileName, _real *prUNode1, _real r1)
 		{
 			fgetpos( fp, &fpos );
 			fflush( fp );
-			fread( &(r), sizeof(_real), 1, fp );
+			(void)!fread( &(r), sizeof(_real), 1, fp );
 			fflush( fp );
 			r = (_real)(r + prUNode1[ii]*r1*dT);
+//		CString csBuf1;
 			fsetpos( fp, &fpos );
 			fflush( fp );
 			fwrite( &(r), sizeof(_real), 1, fp );
@@ -523,7 +473,6 @@ void CFieldIntegrated::Integrate(CString csFileName, _real *prUNode1, _real r1)
 	};
 	
 	fclose(fp);
-	SetFileAttributes( csFileName, FILE_ATTRIBUTE_NORMAL );
 
 	return;
 
@@ -561,24 +510,24 @@ void CFieldIntegrated::MakeFileAmplitudeAndFaza()
 		return;
 	};
 
-	for( i = 0; ( fpSin = fopen( csFileSin , "r+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpSin = fopen( csFileSin , "r+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileSin ); return; };	// N-24
 		Sleep( 10 );
 	};
-	for( i = 0; ( fpCos = fopen( csFileCos , "r+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpCos = fopen( csFileCos , "r+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileCos, fpSin ); return; };	// N-24
 		Sleep( 10 );
 	};
-	for( i = 0; ( fpFaz = fopen( csFileFaza , "w+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpFaz = fopen( csFileFaza , "w+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileFaza, fpSin, fpCos ); return; };	// N-24
 		Sleep( 10 );
 	};
-	for( i = 0; ( fpAmp = fopen( csFileAmplitude , "w+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpAmp = fopen( csFileAmplitude , "w+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileAmplitude, fpSin, fpCos, fpFaz ); return; };	// N-24
 		Sleep( 10 );
 	};
 
@@ -630,14 +579,15 @@ void CFieldIntegrated::MakeFileAmplitudeAndFaza()
 	fflush( NULL );
 	for( i = 0; i < nY; i++)
 	{
-		fread( szBuf, 1, 2, fpSin );
-		fread( szBuf, 1, 2, fpCos );
+		(void)!fread( szBuf, 1, 2, fpSin );
+		(void)!fread( szBuf, 1, 2, fpCos );
 		fprintf( fpFaz, "%c%c", 13, 10);
 		fprintf( fpAmp, "%c%c", 13, 10);
 		for( j = 0; j < nX; j++ )
 		{
-			fread( &(rSin), sizeof(_real), 1, fpSin );
-			fread( &(rCos), sizeof(_real), 1, fpCos );
+			(void)!fread( &(rSin), sizeof(_real), 1, fpSin );
+			(void)!fread( &(rCos), sizeof(_real), 1, fpCos );
+			// Амплитуда гармоники A = 2*sqrt(S^2 + C^2)/(Tmax - Tmin), фаза atan2(S, C) в ANGLE_UNIT.
 			rAmp = (_real)(2*sqrt( rSin*rSin + rCos*rCos )/(dTmax-dTmin));
 			rFaz = (_real)(atan2( rSin, rCos )/cParam.rAngleUnit);
 			fwrite( &(rAmp), sizeof(_real), 1, fpAmp );
@@ -650,10 +600,6 @@ void CFieldIntegrated::MakeFileAmplitudeAndFaza()
 	fclose(fpAmp);
 	fclose(fpFaz);
 	
-	SetFileAttributes( csFileSin, FILE_ATTRIBUTE_NORMAL );
-	SetFileAttributes( csFileCos, FILE_ATTRIBUTE_NORMAL );
-	SetFileAttributes( csFileFaza, FILE_ATTRIBUTE_NORMAL );
-	SetFileAttributes( csFileAmplitude, FILE_ATTRIBUTE_NORMAL );
 
 	return;
 
@@ -777,6 +723,7 @@ void CFieldIntegrated::BorderGeometry( void )
 	y0 = ( dDirPatYmin < -0.9*FLT_MAX ) ? ( dYmin + 10*dDelta )          : dDirPatYmin;
 	y1 = ( dDirPatYmax < -0.9*FLT_MAX ) ? ( dYmin + (nY-10)*dDelta )     : dDirPatYmax;
 
+	// Контур в номерах узлов, расширенный на узел наружу, и зажатый в пределы сетки.
 	nBX0 = (int)( (x0 - dXmin)/dDelta + 0.5 ) - 1;
 	nBX1 = (int)( (x1 - dXmin)/dDelta + 0.5 ) + 1;
 	nBY0 = (int)( (y0 - dYmin)/dDelta + 0.5 ) - 1;
@@ -991,14 +938,14 @@ void CFieldIntegrated::MakeFileAmplitudeAndFazaFromMemory()
 	FILE *fpFaz, *fpAmp;
 	_real rSin, rCos, rAmp, rFaz;
 
-	for( i = 0; ( fpFaz = fopen( csFileFaza , "w+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpFaz = fopen( csFileFaza , "w+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileFaza ); return; };	// N-24
 		Sleep( 10 );
 	};
-	for( i = 0; ( fpAmp = fopen( csFileAmplitude , "w+b") ) == NULL; i++ ) 
+	for( i = 0; ( fpAmp = fopen( csFileAmplitude , "w+b") ) == NULL; i++ )
 	{
-		if( i > 2000  ) return;
+		if( i > 2000  ) { TmcFieldOpenError( cError, csFileAmplitude, fpFaz ); return; };	// N-24
 		Sleep( 10 );
 	};
 
@@ -1045,8 +992,6 @@ void CFieldIntegrated::MakeFileAmplitudeAndFazaFromMemory()
 	fclose(fpAmp);
 	fclose(fpFaz);
 	
-	SetFileAttributes( csFileFaza, FILE_ATTRIBUTE_NORMAL );
-	SetFileAttributes( csFileAmplitude, FILE_ATTRIBUTE_NORMAL );
 
 	return;
 
@@ -1071,6 +1016,7 @@ void CFieldIntegrated::ExportToDirectionalPattern()
 {
 	if( IsError() ) return;
 
+	// Сетку и единицы берём из заголовков .AMP/.FAZ (в режиме полос файлов нет).
 	if( !bBorderOnly ) ReadParamFromFile();	// BORDER
 	SetDirectionalPatternParamDefault();
 
@@ -1086,11 +1032,26 @@ void CFieldIntegrated::ExportToDirectionalPattern()
 		nCut = csBase.ReverseFind( '.' );
 		if( nCut > 0 ) csBase = csBase.Left( nCut );
 
+		int nDig, k2;	// N-21: as many digits after the point as the names need to differ
+		for( nDig = 0; nDig < 6; nDig++ )
+		{
+			BOOL bSame = FALSE;
+			for( k = 0; ( k < nFreqNum )&&( !bSame ); k++ )
+				for( k2 = k + 1; ( k2 < nFreqNum )&&( !bSame ); k2++ )
+				{
+					CString cs1, cs2;
+					cs1.Format( "%.*lf", nDig, dFreqList[k]/1.0e6 );
+					cs2.Format( "%.*lf", nDig, dFreqList[k2]/1.0e6 );
+					if( strcmp( cs1, cs2 ) == 0 ) bSame = TRUE;
+				};
+			if( !bSame ) break;
+		};
+
 		for( k = 0; k < nFreqNum; k++ )
 		{
 			nFreqCur = k;
 			dFreq    = dFreqList[k];
-			csOne.Format( "%s_%.0lfMHz.DAT", (const char *)csBase, dFreqList[k]/1.0e6 );
+			csOne.Format( "%s_%.*lfMHz.DAT", (const char *)csBase, nDig, dFreqList[k]/1.0e6 );
 			csFileDirectPattern = csOne;
 			MakeDirectionalPatternFile();
 			if( IsError() ) break;
@@ -1107,10 +1068,6 @@ void CFieldIntegrated::ExportToDirectionalPattern()
 	return;
 }
 
-CString CFieldIntegrated::GetcsDirectPatternFile()
-{
-	return csFileDirectPattern;
-}
 
 void CFieldIntegrated::ReadParamFromFile()
 {
@@ -1166,7 +1123,7 @@ void CFieldIntegrated::ReadParamFromFile()
 		||(dXminA != dXminF) 
 		||(dYminA != dYminF) 
 		||(dLongUnitA != dLongUnitF) 
-		||(dTimeUnitA != dTimeUnitA) )
+		||(dTimeUnitA != dTimeUnitF) )	// I-02: the typo dTimeUnitA != dTimeUnitA (always false)
 	{
 		CString csBuf;
 		csBuf.Format("Data in file {%s} and data in file {%s} is different ", csFileAmplitude, csFileFaza);
@@ -1176,7 +1133,7 @@ void CFieldIntegrated::ReadParamFromFile()
 	if( (nAccuracyA != sizeof(_real)) )
 	{
 		CString csBuf;
-		csBuf.Format("Accuracy data in file {%s} = %d and program accuracy = %d is different ", csFileAmplitude, nAccuracyA, (int)sizeof(_real) );
+		csBuf.Format("Accuracy data in file {%s} = %d and program accuracy = %d is different ", csFileAmplitude, nAccuracyA, sizeof(_real) );
 		cError.PutErrorMessage(csBuf);
 		return;
 	};
@@ -1348,6 +1305,9 @@ void CFieldIntegrated::SetDirectionalPatternParamDefault()
 
 	if( dDirPatXmax < -0.9*FLT_MAX )
 	{
+		/// Б-14 (автор 29.10): контур несимметричен — 10 шагов от X_MIN/Y_MIN и 8 от X_MAX/Y_MAX (nX включает
+		/// запасной столбец, Б-2.2). На ДН это не влияет: контур — решётка, каждая сторона которой излучает в свою
+		/// полуплоскость. Оставлено как есть, ключ контура не вводится (проверки — в TPL Designer).
 		dDirPatXmax = dXmin + (nX-10)*dDelta;
 	};
 
@@ -1495,6 +1455,7 @@ void CFieldIntegrated::MakeDirectionalPatternFileZagolovok()
 		return;
 	};
 
+	// Число записей: по 3 на точку (Ez, Hy, Hx) на двух сторонах каждого направления.
 	nIzlX = (2*3*GetNumberOfEmittersAlongX() );
 	if( nIzlX < 1 ) 
 	{
@@ -1564,6 +1525,8 @@ void CFieldIntegrated::AddDirectionalPatternFileXmin()
 	int nIzl = GetNumberOfEmittersAlongY();
 	double x, y, aEz, fEz, aHx, fHx, aHy, fHy;
 
+	// Точки левой стороны — через шаг, между узлами по Y. Точка, где cos(fHy - fEz) >= 0,
+	// записывается с нулевыми амплитудами Ez и Hy; знак фаз перед записью меняется.
 	for( i = 0, x = dDirPatXmin, y = dDirPatYmin + dDelta/2.; i < nIzl; i++, y += dDelta )
 	{
 		ReadAmplitudaAndFazaX( x, y, aEz, fEz, aHx, fHx, aHy, fHy );
@@ -1660,6 +1623,9 @@ void CFieldIntegrated::ReadAmplitudaAndFazaX(double &x, double &y, double &aEz, 
 
 	koef = 299792458./(2*3.141592653589*dFreq)/dDelta;
 
+	// Ez в точке — среднее комплексных значений двух соседних узлов по Y.
+	// Hy — из разности Ez левого и правого столбцов (через шаг по X), умноженной
+	// на c/(omega*Delta)/4; фаза Hy сдвинута на pi/2.
 	ReadAmplitudaAndFazaEz( x, y - dDelta/2, aEz1, fEz1);
 	ReadAmplitudaAndFazaEz( x, y + dDelta/2, aEz2, fEz2);
 	aEz = 0.5*sqrt( (aEz1*cos(fEz1)+aEz2*cos(fEz2))*(aEz1*cos(fEz1)+aEz2*cos(fEz2)) + (aEz1*sin(fEz1)+aEz2*sin(fEz2))*(aEz1*sin(fEz1)+aEz2*sin(fEz2)) );
@@ -1684,6 +1650,8 @@ void CFieldIntegrated::ReadAmplitudaAndFazaY(double &x, double &y, double &aEz, 
 
 	koef = 299792458./(2*3.141592653589*dFreq)/dDelta;
 
+	// Как ReadAmplitudaAndFazaX с заменой осей: Ez — среднее двух узлов по X,
+	// Hx — из разности Ez нижней и верхней строк (через шаг по Y).
 	ReadAmplitudaAndFazaEz( x - dDelta/2, y, aEz1, fEz1);
 	ReadAmplitudaAndFazaEz( x + dDelta/2, y, aEz2, fEz2);
 	aEz = 0.5*sqrt( (aEz1*cos(fEz1)+aEz2*cos(fEz2))*(aEz1*cos(fEz1)+aEz2*cos(fEz2)) + (aEz1*sin(fEz1)+aEz2*sin(fEz2))*(aEz1*sin(fEz1)+aEz2*sin(fEz2)) );
@@ -1747,6 +1715,8 @@ void CFieldIntegrated::ReadAmplitudaAndFazaEz(double x, double y, double &aEz, d
 	aEz = 0.0;
 	fEz = 0.0;
 
+	// Ближайший узел; без массивов в памяти значение читается из файлов
+	// .AMP/.FAZ последовательным пропуском строк (медленно, на каждую точку).
 	nX1 = (int)((x+0.5*dDelta-dXmin)/dDelta);
 	nY1 = (int)((y+0.5*dDelta-dYmin)/dDelta);
 
@@ -1762,7 +1732,9 @@ void CFieldIntegrated::ReadAmplitudaAndFazaEz(double x, double y, double &aEz, d
 			return;
 		};
 		aEz = prAmp[ iSlot ];
-		fEz = prFaz[ iSlot ];
+		// I-01: the phase is stored in ANGLE_UNIT - back to radians (old: fEz = prFaz[ iSlot ]; - wrong for gradus)
+		/// I-01: фаза в массиве — в единицах ANGLE_UNIT (atan2/rAngleUnit), дальше нужна в радианах.
+		fEz = prFaz[ iSlot ]*cParam.rAngleUnit;
 		return;		
 	};
 
@@ -1824,10 +1796,10 @@ void CFieldIntegrated::ReadAmplitudaAndFazaEz(double x, double y, double &aEz, d
 				return;
 			};
 		};
-		fread( &(ch), 1, 1, pfDataF );
-		fread( &(ch), 1, 1, pfDataF );
-		fread( &(ch), 1, 1, pfDataA );
-		fread( &(ch), 1, 1, pfDataA );
+		(void)!fread( &(ch), 1, 1, pfDataF );
+		(void)!fread( &(ch), 1, 1, pfDataF );
+		(void)!fread( &(ch), 1, 1, pfDataA );
+		(void)!fread( &(ch), 1, 1, pfDataA );
 	};
 
 	for( j = 0; j < nX1; j++ )
@@ -1849,7 +1821,8 @@ void CFieldIntegrated::ReadAmplitudaAndFazaEz(double x, double y, double &aEz, d
 	};
 
 	aEz = rBufA;
-	fEz = rBufF;
+	// I-01: the .FAZ file is in ANGLE_UNIT - back to radians (old: fEz = rBufF;)
+	fEz = rBufF*cParam.rAngleUnit;
 
 	fclose( pfDataF );
 	fclose( pfDataA );
@@ -1875,13 +1848,12 @@ void CFieldIntegrated::AddDirectionalPatternFileOneEmitter(double &x, double &y,
 	double dDkL;
 //	CString csBuf1;
 
-//	dA_111 = sqrt(2.)*3.141592653589*dDelta*dFreq/299792458;
-//	dW0 = 1./(sqrt((8.854187817e-12)/(2.*(12.566370614e-7))))/(sin(acos( (2+fabs(0.)/2.)*cos(dA_111) - 1. - 0./2. ))/sin(dA_111));
-//	dW0 = 1./(sqrt((8.854187817e-12)/((12.566370614e-7))));
-//	koef = sqrt(1./(12.))*(dDelta)*sqrt(dW0);
+	// Нормирующий множитель амплитуды излучателя: зависит от шага сетки и частоты.
 	dDkL = (dDelta*dFreq/299792458);
-//	koef = sqrt(134.304966913/(dFreq/299792458))*dDkL/sqrt(dW0);
-//	koef = sqrt(dDelta*dW0/3.*0.999996/0.9361811)*dDkL/sqrt(dW0)/sqrt(dFreq/299792458);
+	/// З-13 (автор 29.10): калибровка СЕТОЧНОЙ функции Грина двумерной задачи. «/3» — точка контура даёт три
+	/// излучателя, образующих элемент Гюйгенса: электрический вибратор (Ez, ДН «1.») и магнитный ток (Hx, Hy,
+	/// ДН «sin(f)», «cos(f)»); на каждой стороне контура элемент свой и смотрит наружу, ориентация (cos/sin) —
+	/// по типу границы (З-14).
 	koef = sqrt(dDelta/3.*0.999996/0.9361811)*dDkL/sqrt(dFreq/299792458);
 
 	nEmitterInFile++;
@@ -2013,10 +1985,10 @@ void CFieldIntegrated::ReadAmplitudaAndFazaEzMInit()
 			};
 			ii++;
 		};
-		fread( &(ch), 1, 1, pfDataF );
-		fread( &(ch), 1, 1, pfDataF );
-		fread( &(ch), 1, 1, pfDataA );
-		fread( &(ch), 1, 1, pfDataA );
+		(void)!fread( &(ch), 1, 1, pfDataF );
+		(void)!fread( &(ch), 1, 1, pfDataF );
+		(void)!fread( &(ch), 1, 1, pfDataA );
+		(void)!fread( &(ch), 1, 1, pfDataA );
 	};
 
 	fclose( pfDataF );

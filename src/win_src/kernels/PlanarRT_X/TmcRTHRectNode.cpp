@@ -1,18 +1,167 @@
 // TmcRTHRectNode.cpp : implementation file
 //
 
-#include "StdAfx.h"
-#include "PlanRT_H.h"
-#include <Tmcgrviw.h>
-#include "TmcRTHRectNode.h"
+/// @file tmcrthrectnode.cpp
+/// @brief Сетка X-ядра: подготовка шага `#STEP`, пересчёт eps, N, B, Y, sigma в коэффициенты
+///        узлов, цикл во времени по 4 подтактам, вывод сигналов `.t`, полей и топологии.
+///
+/// Часть модуля «Счётное ядро X». Реализует `CTmcRTHRectNode` и служебные функции
+/// файла `.t` шага (держится открытым всё время шага). Порядок вызовов на одном
+/// подтакте: порты -> сохранение узлов портов -> рассеяние во всех внутренних узлах ->
+/// восстановление узлов портов -> граничные условия блоков -> поле -> накопление для ДН.
+/// @see https://www.tamic.ru/docs/code/kernel-x.html#time-loop
+#include <tmcgrviw.h>
+#include "tmcrthrectnode.h"
 #include <malloc.h>
-#include "Pl_iofor.h"
+#include "pl_iofor.h"
 
-#ifdef _DEBUG
-#define new DEBUG_NEW
-#undef THIS_FILE
-static char THIS_FILE[] = __FILE__;
-#endif
+/// Сетка на видеокарте на время `RunKernel` (одна на процесс; см. `tmcgpux.h`).
+
+// T-5, T-9: the .t file of the step.
+// T-5: the file is kept open while the step runs; other programs may read it, but not
+// write it (_SH_DENYWR): a second kernel with the same FILE gets an error instead of
+// mixing its lines into the file. The bytes are the same as before (the same text mode
+// and order); a line goes to the disk when the next one begins, at Stop and at the end.
+// T-9: a busy file is waited for by the clock (20 s), not by 2000 tries of Sleep(10).
+#include <errno.h>
+#include <chrono>
+#include <mutex>
+
+/// Сколько ждать занятый файл при открытии, мс.
+#define TMC_OUTT_WAIT_MS	20000
+/// Сколько файлов `.t` может быть открыто одновременно (таблица `s_aOutT`).
+#define TMC_OUTT_MAX		16
+
+/// Таблица открытых файлов `.t`: имя и поток; `fp` == NULL — свободная запись.
+/// Запись таблицы открытых файлов `.t`: `csName` — полное имя файла, `fp` — открытый поток (NULL — свободна).
+static struct { CString csName; /**< имя файла */ FILE *fp; /**< поток; NULL — запись свободна */ } s_aOutT[TMC_OUTT_MAX];
+/// @var s_aOutT
+/// Таблица открытых файлов `.t` шага (не больше `TMC_OUTT_MAX` записей).
+
+/// Защищает таблицу `s_aOutT` (расчётный поток и поток интерфейса).
+static std::mutex s_mxOutT;
+
+/// @brief Возвращает монотонное время, мс (для ожидания занятого файла).
+/// @return Миллисекунды от произвольного начала отсчёта.
+static long long TmcNowMs( void )
+{
+	return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
+// T-9: open a file, a busy one is waited for at most 20 s; *pnErr - errno of the last try
+/// @brief Открывает файл; если он занят другой программой — повторяет попытки до 20 с.
+///
+/// Ошибки, при которых ожидание не поможет (нет папки, неверное имя), возвращаются сразу.
+/// @param[in]  pszName    имя файла
+/// @param[in]  pszMode    режим fopen
+/// @param[in]  bDenyWrite TRUE — запретить другим программам запись в файл (только Windows)
+/// @param[out] pnErr      errno последней попытки; NULL — не нужен
+/// @return Поток файла; NULL — не открыт.
+FILE *TmcFopenWait( const char *pszName, const char *pszMode, BOOL bDenyWrite, int *pnErr )
+{
+	long long t0 = TmcNowMs();
+	FILE *fp;
+	for( ;; )
+	{
+		errno = 0;
+		fp = fopen( pszName, pszMode );
+		if( fp != NULL ) return fp;
+		if( pnErr != NULL ) *pnErr = errno;
+		if( ( errno != EACCES )&&( errno != EBUSY ) ) return NULL;	// no folder, bad name: waiting does not help
+		if( TmcNowMs() - t0 >= TMC_OUTT_WAIT_MS ) return NULL;
+		Sleep( 10 );
+	};
+}
+
+// T-7, T-9: why a file can't be opened
+/// @brief Составляет понятный текст ошибки открытия файла (длинный путь, файл занят, нет папки).
+/// @param[in] pszName имя файла
+/// @param[in] nErr    errno неудачной попытки
+/// @return Текст ошибки (по-английски).
+CString TmcOpenFailText( const char *pszName, int nErr )
+{
+	CString cs;
+	if( ( nErr == EACCES )||( nErr == EBUSY ) )
+		cs.Format( "Can't open file %s: the file is used by another program (another calculation with the same FILE?) or is read-only", pszName );
+	else if( nErr == ENOENT )
+		cs.Format( "Can't open file %s: no such folder", pszName );
+	else
+		cs.Format( "Can't open file %s: %s", pszName, strerror( nErr ) );
+	return cs;
+}
+
+/// @brief Закрывает файл `.t` с этим именем, если он открыт в таблице.
+/// @param[in] pszName имя файла `.t`
+void TmcOutTClose( const char *pszName )
+{
+	int i;
+	std::lock_guard<std::mutex> lk( s_mxOutT );
+	for( i = 0; i < TMC_OUTT_MAX; i++ )
+	{
+		if( ( s_aOutT[i].fp == NULL )||( strcmp( s_aOutT[i].csName, pszName ) != 0 ) ) continue;
+		fclose( s_aOutT[i].fp );
+		s_aOutT[i].fp = NULL;
+		s_aOutT[i].csName = "";
+	};
+	return;
+}
+
+/// @brief Возвращает открытый поток файла `.t` по имени.
+/// @param[in] pszName имя файла `.t`
+/// @return Поток; NULL — файл не открыт.
+FILE *TmcOutTGet( const char *pszName )
+{
+	int i;
+	std::lock_guard<std::mutex> lk( s_mxOutT );
+	for( i = 0; i < TMC_OUTT_MAX; i++ )
+		if( ( s_aOutT[i].fp != NULL )&&( strcmp( s_aOutT[i].csName, pszName ) == 0 ) ) return s_aOutT[i].fp;
+	return NULL;
+}
+
+/// @brief Сбрасывает на диск буфер открытого файла `.t` (перед построением матрицы рассеяния).
+/// @param[in] pszName имя файла `.t`
+void TmcOutTFlush( const char *pszName )
+{
+	FILE *fp = TmcOutTGet( pszName );
+	if( fp != NULL ) fflush( fp );
+	return;
+}
+
+// T-5: open the .t of the step ("w" - the header, "a" - go on after Stop) and keep it open
+/// @brief Открывает файл `.t` шага и заносит его в таблицу открытых файлов.
+///
+/// Файл открывается с запретом записи для других программ: второе ядро с тем же
+/// именем файла получит ошибку, а не смешает строки.
+/// @param[in]  pszName имя файла `.t`
+/// @param[in]  pszMode "w" — новый файл с заголовком, "a" — дозапись после остановки
+/// @param[out] csErr   текст ошибки, если файл не открыт
+/// @return Поток; NULL — ошибка (текст в `csErr`).
+/// @see https://www.tamic.ru/docs/code/kernel-x.html#t-file
+FILE *TmcOutTOpen( const char *pszName, const char *pszMode, CString &csErr )
+{
+	int i, nErr = 0;
+	FILE *fp;
+
+	TmcOutTClose( pszName );
+	if( ( fp = TmcFopenWait( pszName, pszMode, TRUE, &nErr ) ) == NULL )
+	{
+		csErr = TmcOpenFailText( pszName, nErr );
+		return NULL;
+	};
+	std::lock_guard<std::mutex> lk( s_mxOutT );
+	for( i = 0; i < TMC_OUTT_MAX; i++ )
+	{
+		if( s_aOutT[i].fp != NULL ) continue;
+		s_aOutT[i].fp = fp;
+		s_aOutT[i].csName = pszName;
+		return fp;
+	};
+	fclose( fp );
+	csErr.Format( "Can't open file %s: too many calculations at once", pszName );
+	return NULL;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 // CTmcRTHRectNode
@@ -30,17 +179,12 @@ CTmcRTHRectNode::CTmcRTHRectNode()
 	nNumNode = 0;
 	
 //	prUNode = NULL;			// array falling voltage 1 = V; 2 = ^; 3 = <; 4 = >
-//	prUyNodeBottom = NULL;
-//	prUyNodeTop  = NULL;
-//	prUxNodeRight = NULL;
-//	prUxNodeLeft  = NULL;
 	prUNode1   = NULL;					// array voltage on unit with 1 takt 
 //	prUNode2   = NULL;					// array voltage on unit with 2 takt  
 	prYNode    = NULL;					// node admitance array
 //	prYMulNode = NULL;					// node multiple admitance array
 //	pnTypeNode = NULL;					// node type array
 
-//	pcNodeDielList = NULL;
 	nDiel = 0;
 	pcNodeDiel = NULL;
 	dXmin = 0.0;				// global parameter Xmin for rectangle
@@ -48,7 +192,7 @@ CTmcRTHRectNode::CTmcRTHRectNode()
 	dYmin = 0.0;				// global parameter Ymin for rectangle
 	dYmax = 0.0;				// global parameter Ymax for rectangle
 	bIsRunStep1Run = FALSE;
-	m_cTiming.csKernel = "PlanarRT_X (tmc_rtx.exe)";	// TIMING
+	m_cTiming.csKernel = "PlanarRT_X (tmc_rtx)";	// TIMING
 	return;
 }
 
@@ -58,11 +202,6 @@ CTmcRTHRectNode::~CTmcRTHRectNode()
 }
 
 
-BEGIN_MESSAGE_MAP(CTmcRTHRectNode, CWnd)
-	//{{AFX_MSG_MAP(CTmcRTHRectNode)
-		// NOTE - the ClassWizard will add and remove mapping macros here.
-	//}}AFX_MSG_MAP
-END_MESSAGE_MAP()
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -147,8 +286,6 @@ void CTmcRTHRectNode::ReadData( CString csFileName, int nStep1 )
 
 	csBuf.Format("Step:%d;%s", nStep1, cError.GetErrorMessage());
 	PutTrace(csBuf);
-	PutSinchronizFlag( cIndan.GetOutput()->bOutTopology, cIndan.GetOutput()->bOutField, cIndan.GetOutput()->bOutFieldSinchronization );
-	PutModel();
 
 	bIsReadData = FALSE;
 	return;
@@ -170,8 +307,6 @@ void CTmcRTHRectNode::ReadData( void )
 
 	csBuf.Format("Step:%d;%s", cIndan.GetnStep(), cError.GetErrorMessage());
 	PutTrace(csBuf);
-	PutSinchronizFlag( cIndan.GetOutput()->bOutTopology, cIndan.GetOutput()->bOutField, cIndan.GetOutput()->bOutFieldSinchronization );
-	PutModel();
 	bIsReadData = FALSE;
 	return;
 }
@@ -183,7 +318,19 @@ void CTmcRTHRectNode::RunStep( void )
 	bIsRunStep1Run = TRUE;
 	__int64 qTmStep = TmcTimingNow();			// TIMING
 	m_cTiming.BeginRunStep();					// TIMING
-	RunStep1();
+	try	// A-37: isklyuchenie ne dolzhno ostavlyat obekt "v schete"
+	{
+		RunStep1();
+	}
+	catch( std::bad_alloc & )
+	{
+		cError.PutErrorMessage( "Exception in calculation: Not enough memory" );
+	}
+	catch( ... )
+	{
+		cError.PutErrorMessage( "Exception in calculation" );
+	};
+	TmcOutTClose( cIndan.GetOutput()->csFileName );	// T-5: the step is over (done, stopped or error) - the .t is closed
 	m_cTiming.cur.nTDone = nTCurrent;			// TIMING
 	m_cTiming.EndRunStep( ( cError.IsError() || cIndan.IsError() ) ? 4 :
 		( ( ( nTMax > 0 )&&( nTCurrent >= nTMax ) ) ? 2 : 3 ), qTmStep );	// TIMING
@@ -344,7 +491,9 @@ void CTmcRTHRectNode::InitKernel( void )
 	__int64 qTm = TmcTimingNow();				// TIMING
 	DeleteOutputFile();
 	m_cTiming.Add( TMCT_OUTFILEINIT, qTm );		// TIMING
+	if( IsError() ) return;	// T-9: the .t can't be opened - no second wait in PutPortInfo
 
+	// Время: число подтактов, начальный момент Tmin и шаг tau из #PARM.
 	nTMax     = cIndan.nGetTmax();
 	csBuf.Format("nTmax %d", nTMax);
 	PutStatistics(csBuf);
@@ -379,6 +528,7 @@ void CTmcRTHRectNode::InitKernel( void )
 		return;
 	};
 	
+	// Область: не меньше 10 шагов по каждой оси и не больше INT_MAX узлов по стороне.
 	cIndan.GetXYMinMax( dXmin, dXmax, dYmin, dYmax );
 	csBuf.Format("X:(%lg)-(%lg); Y:(%lg)-(%lg)", dXmin, dXmax, dYmin, dYmax );
 	PutStatistics(csBuf);
@@ -425,6 +575,7 @@ void CTmcRTHRectNode::InitKernel( void )
 		return;
 	};
 
+	// Общее число узлов: индекс 6n+5 массивов должен помещаться в TmcIdx с запасом.
 	if( ( ((double)(nX))*((double)(nY)) ) > ((double)TMC_IDX_MAX)/8. )	// INT64
 	{
 		csBuf.Format("Error : very dimension XY-size ( X*Y ) in %s section", CTMCRTH_INDANMET_PARAM);
@@ -445,14 +596,18 @@ void CTmcRTHRectNode::InitKernel( void )
 	};
 
 	qTm = TmcTimingNow();						// TIMING
+	// Накопитель распределения поля для ДН (контур, окно по времени).
 	cIndan.GetOutput()->GetFieldIntegrated().InitAllFile( nX, nY, dDelta, dXmin, dYmin, cParam, dT );
 	m_cTiming.Add( TMCT_DISTRINIT, qTm );			// TIMING
 
+	// Накопитель ДН читает значение узла с шагом 6 ячеек на узел.
 	cIndan.GetOutput()->GetFieldIntegrated().SetNodeStep( 6 );
 
-	cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
+	if( cIndan.GetOutput()->GetFieldIntegrated().GetError().IsError() )	// T-9: not erase an error set before
+		cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
 
 
+	// Массивы напряжений и коэффициентов, затем блоки и данные портов в заголовке .t.
 	qTm = TmcTimingNow();						// TIMING
 	InitNodeArray();
 	m_cTiming.Add( TMCT_MEMINIT, qTm );			// TIMING
@@ -489,6 +644,7 @@ void CTmcRTHRectNode::RunKernel( void )
 	csBuf.Format("Run Step %d", cIndan.GetnStep() );
 	PutTrace(csBuf);
 
+	// Новый шаг — отсчёт времени с начала; продолжение после Stop — с прерванного такта.
 	if( nTCurrent == 0 )
 	{
 		ii = 0;
@@ -502,10 +658,15 @@ void CTmcRTHRectNode::RunKernel( void )
 		ltime_start = ltime_current - ltime_start;
 	};
 
+	strncpy( m_cTiming.cur.szCompute, "CPU", sizeof(m_cTiming.cur.szCompute) - 1 );
 	__int64 qTmLoop = TmcTimingNow();					// TIMING
+	// Основной цикл: один проход — четыре подтакта (RunKernel1T увеличивает nTCurrent на 4).
+	/// З-6 (автор 29.10): при нечётном числе подтактов считается на один подтакт больше заданного TIME — допустимо.
+	/// З-3 (автор 29.10): вход внутри области — общий проход переписывает узлы входа, и в кадр поля и накопление
+	/// ДН попадает значение после рассеяния; допустимо. Сказаться может, если вход лежит на контуре ДН — проверить.
 	for( ; nTCurrent < nTMax;  ii+=4)
 	{
-		if( IsError() ) { m_cTiming.Add( TMCT_LOOPWALL, qTmLoop ); m_cTiming.cur.nTDone = nTCurrent; return; }	// TIMING
+		if( IsError() ) { m_cTiming.Add( TMCT_LOOPWALL, qTmLoop ); m_cTiming.cur.nTDone = nTCurrent; return; }	// TIMING, GPU
 		if( !bIsReadData ) 
 		{
 			m_cTiming.Add( TMCT_LOOPWALL, qTmLoop );	// TIMING
@@ -513,17 +674,18 @@ void CTmcRTHRectNode::RunKernel( void )
 			time( &ltime_current );
 			nBuf = (int)( (dTCurrent/cParam.rTimeUnit)*100 + 0.5 );
 			csBuf.Format("nT:%d(%lg%s);%ld;%lg", nTCurrent, nBuf*0.01,
-				(LPCTSTR)cParam.csTimeUnit,ltime_current - ltime_start, 
+				cParam.csTimeUnit,ltime_current - ltime_start, 
 				((double)ltime_current - ltime_start)/nTCurrent);
 			PutStatistics(csBuf);
 			return;
 		};
+		// Каждые 100 подтактов — ход счёта и прошедшее время в строку состояния.
 		if( ii == 100 )
 		{
 			__int64 qTmSt = TmcTimingNow();			// TIMING
 			time( &ltime_current );
 			nBuf = (int)( (dTCurrent/cParam.rTimeUnit)*100 + 0.5 );
-			csBuf.Format("nT:%d;Time:%lg%s", nTCurrent, nBuf*0.01, (LPCTSTR)cParam.csTimeUnit );
+			csBuf.Format("nT:%d;Time:%lg%s", nTCurrent, nBuf*0.01, cParam.csTimeUnit );
 			PutStatistics(csBuf);
 			ii = ltime_current - ltime_start;
 			if( ii <= 60 )
@@ -559,6 +721,17 @@ void CTmcRTHRectNode::RunKernel( void )
 		((double)ltime_current - ltime_start)/nTCurrent);
 	PutStatistics(csBuf);
 	
+	// Окно ДН заканчивается позже конца расчёта — файлы ДН не будут записаны: это ошибка.
+	if( ( !IsError() )&&( bIsReadData )&&( nTCurrent >= nTMax )&&	// A-14: faily DN ne zapisany
+		( cIndan.GetOutput()->GetFieldIntegrated().bIsFieldDistr() )&&
+		( cIndan.GetOutput()->GetFieldIntegrated().IsWindowOpen() ) )
+	{
+		csBuf.Format("Directional pattern window ends at %lg %s, after the calculation time: DN files are not written",
+			cIndan.GetOutput()->GetFieldIntegrated().GetTmax()/cParam.rTimeUnit, (LPCTSTR)cParam.csTimeUnit );
+		cError.PutErrorMessage( csBuf );
+	};
+
+	// После цикла: матрица рассеяния по сигналам .t (файлы ДН пишутся только по команде меню).
 	__int64 qTmPost = TmcTimingNow();			// TIMING
 	PutSmatrix();
 	m_cTiming.Add( TMCT_SMATRIX, qTmPost );		// TIMING
@@ -582,6 +755,14 @@ void CTmcRTHRectNode::RunRestoreInputs( void )
     int i;
     for( i = 0; i < nDiel; i++ ) pcNodeDiel[i].RestoreInputNodes( prUNode1 );
 }
+// B-1 (29.10.2026): after the blocks - the nodes of the plane-wave ports once more (the port wins in the nodes
+// shared with a MAGNETIC wall, as in the kernel H; old: the wall overwrote the edge nodes of the port)
+/// Б-1: после блоков ещё раз восстанавливает узлы портов плоской волны (`RestorePlaneWavePortNodes`).
+void CTmcRTHRectNode::RunRestorePlaneWaveInputs( void )
+{
+    int i;
+    for( i = 0; i < nDiel; i++ ) pcNodeDiel[i].RestorePlaneWavePortNodes( prUNode1 );
+}
 /* ==== END BUG12 PORTFIX (RectNode) ==== */
 
 void CTmcRTHRectNode::RunKernel1T( void )
@@ -592,6 +773,9 @@ void CTmcRTHRectNode::RunKernel1T( void )
 
 //   excite and out reflection wave for inputs 
 //   calculation reflection wave
+	// Подтакт 0: новое значение пишется в ячейку 0 узла (там было U^(tau-4)), U^(tau-1) — ячейка 3.
+	// Узлы портов обновляет сам порт: общий проход рассеяния их не меняет (сохранение и
+	// восстановление вокруг него).
 	qTm0 = TmcTimingNow();								// TIMING
 	RunExciteInputs();
 	RunSaveInputs();
@@ -600,6 +784,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 	qTm0 = TmcTimingNow(); m_cTiming.cur.q[TMCT_SCATTER] += qTm0 - qTm1;		// TIMING
 	RunRestoreInputs();
 	RunBlockNode();
+	RunRestorePlaneWaveInputs();	// B-1: the plane-wave port wins over the walls
 	qTm1 = TmcTimingNow(); m_cTiming.cur.q[TMCT_BLOCKNODE] += qTm1 - qTm0;	// TIMING
 	PutField( 0 );
 	m_cTiming.cur.q[TMCT_FIELDFILE] += TmcTimingNow() - qTm1;				// TIMING
@@ -609,6 +794,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 
 //   excite and out reflection wave for inputs 
 //   calculation reflection wave
+	// Подтакт 1: пишется ячейка 1, U^(tau-1) — ячейка 0.
 	qTm0 = TmcTimingNow();								// TIMING
 	RunExciteInputs1();
 	RunSaveInputs();
@@ -617,6 +803,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 	qTm0 = TmcTimingNow(); m_cTiming.cur.q[TMCT_SCATTER] += qTm0 - qTm1;		// TIMING
 	RunRestoreInputs();
 	RunBlockNode1();
+	RunRestorePlaneWaveInputs();	// B-1: the plane-wave port wins over the walls
 	qTm1 = TmcTimingNow(); m_cTiming.cur.q[TMCT_BLOCKNODE] += qTm1 - qTm0;	// TIMING
 	PutField( 1 );
 	m_cTiming.cur.q[TMCT_FIELDFILE] += TmcTimingNow() - qTm1;				// TIMING
@@ -626,6 +813,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 
 //   excite and out reflection wave for inputs 
 //   calculation reflection wave
+	// Подтакт 2: пишется ячейка 2, U^(tau-1) — ячейка 1.
 	qTm0 = TmcTimingNow();								// TIMING
 	RunExciteInputs2();
 	RunSaveInputs();
@@ -634,6 +822,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 	qTm0 = TmcTimingNow(); m_cTiming.cur.q[TMCT_SCATTER] += qTm0 - qTm1;		// TIMING
 	RunRestoreInputs();
 	RunBlockNode2();
+	RunRestorePlaneWaveInputs();	// B-1: the plane-wave port wins over the walls
 	qTm1 = TmcTimingNow(); m_cTiming.cur.q[TMCT_BLOCKNODE] += qTm1 - qTm0;	// TIMING
 	PutField( 2 );
 	m_cTiming.cur.q[TMCT_FIELDFILE] += TmcTimingNow() - qTm1;				// TIMING
@@ -643,6 +832,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 
 //   excite and out reflection wave for inputs 
 //   calculation reflection wave
+	// Подтакт 3: пишется ячейка 3, U^(tau-1) — ячейка 2.
 	qTm0 = TmcTimingNow();								// TIMING
 	RunExciteInputs3();
 	RunSaveInputs();
@@ -651,6 +841,7 @@ void CTmcRTHRectNode::RunKernel1T( void )
 	qTm0 = TmcTimingNow(); m_cTiming.cur.q[TMCT_SCATTER] += qTm0 - qTm1;		// TIMING
 	RunRestoreInputs();
 	RunBlockNode3();
+	RunRestorePlaneWaveInputs();	// B-1: the plane-wave port wins over the walls
 	qTm1 = TmcTimingNow(); m_cTiming.cur.q[TMCT_BLOCKNODE] += qTm1 - qTm0;	// TIMING
 	PutField( 3 );
 	m_cTiming.cur.q[TMCT_FIELDFILE] += TmcTimingNow() - qTm1;				// TIMING
@@ -683,9 +874,10 @@ void CTmcRTHRectNode::InitNodeArray( void )
 		DeleteNodeArray();
 		return;
 	};
+	// Выравнивание начала массива на 32 байта (сдвиг 1..32 байта; запас 32 элемента).
 	pTemp  = (void *)prUNode1Temp;
 	pTemp1 = (char *)prUNode1Temp;
-	ii = (int)(intptr_t)pTemp;
+	ii = (int)(INT_PTR)pTemp;
 	i = 32 - (ii - (ii/32)*32);
 	pTemp1 += i;
 	prUNode1 = (_ELEM_VAL_RTH *) pTemp1;
@@ -704,28 +896,13 @@ void CTmcRTHRectNode::InitNodeArray( void )
 	};
 	pTemp  = (void *)prYNodeTemp;
 	pTemp1 = (char *)prYNodeTemp;
-	ii = (int)(intptr_t)pTemp;
+	ii = (int)(INT_PTR)pTemp;
 	i = 32 - (ii - (ii/32)*32);
 	pTemp1 += i;
 	prYNode = (_real *) pTemp1;
 
 //	CString csBuf1;
-//	csBuf1.Format("{prUNode1(%p), prYNode(%p)}", prUNode1, prYNode );
-//	AfxMessageBox(csBuf1);
-/*	if( (prYMulNode	= new _real[ nNumNode ]) == NULL )
-	{			 
-		cError.PutErrorMessage("Not enough memory for space array");
-		DeleteNodeArray();
-		return;
-	};
-*/
-/*	if( (pnTypeNode	= new int[ nNumNode ]) == NULL )
-	{			 
-		cError.PutErrorMessage("Not enough memory for space array");
-		DeleteNodeArray();
-		return;
-	};
-*/
+	// Все 6 + 6 ячеек узла — нули; коэффициенты свободного пространства задаст SetDielInNodeList.
 	for( i = 0, ii = 0; i < nNumNode; i++ )	
 	{
 		prYNode[ii++]  = (_real)(0.0);
@@ -819,7 +996,6 @@ void CTmcRTHRectNode::RunStep1( void )
 	};
 
 	__int64 qTmSnd = TmcTimingNow();			// TIMING
-	PutStepEndSound();
 	m_cTiming.Add( TMCT_SOUND, qTmSnd );		// TIMING
 
 	bIsReadData = FALSE;
@@ -827,10 +1003,6 @@ void CTmcRTHRectNode::RunStep1( void )
 	return;
 }
 
-BOOL CTmcRTHRectNode::IsRunStep( void )
-{
-	return bIsRunStep1Run;
-}
 
 BOOL CTmcRTHRectNode::IsDataInit( void )
 {
@@ -871,6 +1043,23 @@ void CTmcRTHRectNode::InitDielArray( void )
 	m_cTiming.Add( TMCT_BLOCKGEOM, qTm );			// TIMING
 	qTm = TmcTimingNow();						// TIMING
 	SetDielInNodeList();
+	// R-1: the absorber load by the medium of its nodes - after the admittances are final, before the GPU copy
+	for( int iR1 = 0; ( iR1 < nDiel )&&( !IsError() )&&( pcNodeDiel != NULL ); iR1++ )
+		cError = pcNodeDiel[iR1].SetAbsorberLoadByMedium( cParam, prYNode, 6, 1, nNumNode );
+	{	// R-1: absorber nodes in a medium without a propagating wave keep the old (vacuum) load - a warning
+		TmcIdx nNoWave = 0;
+		for( int iR1 = 0; ( iR1 < nDiel )&&( pcNodeDiel != NULL ); iR1++ ) nNoWave += pcNodeDiel[iR1].GetAbsorberNoWave();
+		if( nNoWave > 0 )
+		{
+			CString csW;
+			csW.Format("WARNING: %.0f absorber nodes are in a medium where the wave does not propagate on this grid "
+				"(a dense plasma eps < 0 or k*Delta too large) - they keep the load of the vacuum; the absorber "
+				"does not absorb there, move it out of such a medium", (double)nNoWave );
+			ConsolePrint( "%s", (LPCSTR)csW );
+			PutTrace( csW );
+			SetRunWarning( csW );
+		};
+	};
 	m_cTiming.Add( TMCT_ADMITTANCE, qTm );		// TIMING
 	qTm = TmcTimingNow();						// TIMING
 	PutTopology();
@@ -927,22 +1116,35 @@ void CTmcRTHRectNode::SetDielTopology( void )
 		};
 	}
 
+//  A-20: spisok tonov signala peredaetsya v FieldIntegrated, kak v H-yadre	// BORDER
+	for( i = 0; i < nDiel; i++ )
+	{
+		CString csFL = pcNodeDiel[i].GetSigFreqList();
+		if( csFL.GetLength() < 1 ) continue;
+		cIndan.GetOutput()->GetFieldIntegrated().SetFreqList( csFL, cParam.rFreqUnit );
+		if( ( cIndan.GetOutput()->GetFieldIntegrated().GetFreqNum() > 1 )&&	// A-5
+			( cIndan.GetOutput()->GetFieldIntegrated().bIsFieldDistr() )&&
+			( !cIndan.GetOutput()->GetFieldIntegrated().bIsItegratedInMemory() ) )
+		{
+			cError.PutErrorMessage("Multi-frequency directional pattern needs FIELD_DISTRIBUTION_M (not FIELD_DISTRIBUTION)");
+			return;
+		};
+		if( cIndan.GetOutput()->GetFieldIntegrated().GetFreqNum() > 1 )
+			cIndan.GetOutput()->GetFieldIntegrated().InitArrayForIntegrate();
+		break;					// one list describes the excitation
+	};
+
 	return;
 }
 
-BOOL CTmcRTHRectNode::IsReadData( void )
-{
-	return bIsReadData;
-}
 
-//#pragma optimize( "f", on )
 
 void CTmcRTHRectNode::RunScatteringNode( void )
 {
 	if( IsError() ) return;
 
 	CString csBuf1;
-	int i, ny1, nx1, nx14, nx148, ny14, nx11_10;
+	int i, ny1, nx1, nx14, nx148, ny14, ny148, nx11_10;
 	_ELEM_VAL_RTH *pr1;
 	_real *prY1;
 
@@ -951,7 +1153,11 @@ void CTmcRTHRectNode::RunScatteringNode( void )
 	nx14  = nX*6;
 	ny14  = nX*6;
 	nx148 = nX*6;
+	ny148 = nX*6;
 	nx11_10 = nx1;
+	// Обходятся только внутренние узлы: строки 1..nY-2, столбцы 1..nX-2.
+	// Узлы краёв области не пересчитываются и остаются нулевыми (если их не задаёт блок):
+	// на краю области Hz = 0, то есть в X-ядре край — магнитная стенка.
 	for(i = 0, 
 			pr1 = prUNode1+6+nx14, 
 			prY1 = prYNode+6+ny14;
@@ -972,7 +1178,7 @@ void CTmcRTHRectNode::RunScatteringNode1( void )
 	if( IsError() ) return;
 
 	CString csBuf1;
-	int i, ny1, nx1, nx14, nx148, ny14, nx11_10;
+	int i, ny1, nx1, nx14, nx148, ny14, ny148, nx11_10;
 	_ELEM_VAL_RTH *pr1;
 	_real *prY1;
 
@@ -981,6 +1187,7 @@ void CTmcRTHRectNode::RunScatteringNode1( void )
 	nx14  = nX*6;
 	ny14  = nX*6;
 	nx148 = nX*6;
+	ny148 = nX*6;
 	nx11_10 = nx1;
 	for(i = 0, 
 			pr1 = prUNode1+6+nx14, 
@@ -1003,7 +1210,7 @@ void CTmcRTHRectNode::RunScatteringNode2( void )
 	if( IsError() ) return;
 
 	CString csBuf1;
-	int i, ny1, nx1, nx14, nx148, ny14, nx11_10;
+	int i, ny1, nx1, nx14, nx148, ny14, ny148, nx11_10;
 	_ELEM_VAL_RTH *pr1;
 	_real *prY1;
 
@@ -1012,6 +1219,7 @@ void CTmcRTHRectNode::RunScatteringNode2( void )
 	nx14  = nX*6;
 	ny14  = nX*6;
 	nx148 = nX*6;
+	ny148 = nX*6;
 	nx11_10 = nx1;
 	for(i = 0, 
 			pr1 = prUNode1+6+nx14, 
@@ -1034,7 +1242,7 @@ void CTmcRTHRectNode::RunScatteringNode3( void )
 	if( IsError() ) return;
 
 	CString csBuf1;
-	int i, ny1, nx1, nx14, nx148, ny14, nx11_10;
+	int i, ny1, nx1, nx14, nx148, ny14, ny148, nx11_10;
 	_ELEM_VAL_RTH *pr1;
 	_real *prY1;
 
@@ -1043,6 +1251,7 @@ void CTmcRTHRectNode::RunScatteringNode3( void )
 	nx14  = nX*6;
 	ny14  = nX*6;
 	nx148 = nX*6;
+	ny148 = nX*6;
 	nx11_10 = nx1;
 	for(i = 0, 
 			pr1 = prUNode1+6+nx14, 
@@ -1061,20 +1270,7 @@ void CTmcRTHRectNode::RunScatteringNode3( void )
 
 
 
-//#pragma optimize( "f", off )
 
-void CTmcRTHRectNode::DeleteDielList( sTmcRTH_DielNodeList ** pcNodeDielList1 )
-{
-	if( pcNodeDielList1 == NULL ) return;
-	if( pcNodeDielList1[ 0 ]->pcDielNodeNextList != NULL )
-	{
-		DeleteDielList( &(pcNodeDielList1[0]->pcDielNodeNextList) );
-	};
-	delete pcNodeDielList1[0];
-	pcNodeDielList1[0] = NULL;
-
-	return;
-}
 
 void CTmcRTHRectNode::SetDielInNodeList( void )
 {
@@ -1101,12 +1297,15 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 	TmcIdx i, ii;	// INT64
 	int jj;
 	double a, koef, koef1;
-	double d_EpsAdd, d_N_ElectronConcentr, d_B_MagneticField;
+	double d_EpsAdd, d_N_ElectronConcentr, d_B_MagneticField, d_Y_Loss;
 	double d_e, d_m, d_eps0;
 	double d_y5, d_y6, d_y7;
 	double koef_N, koef_wp2, koef_WC2;
 	double d_wp2, d_WC2;
 
+	// koef1 — поправка omega*tau/2 (проверяется на величину, но в расчёт идёт 1);
+	// koef_N = e^2/(m*eps0*omega^2) переводит N в Delta eps, koef_wp2 = e^2/(m*eps0) — N в wp^2,
+	// koef_WC2 = e^2/m^2 — B^2 в wc^2.
 	koef = (cParam.rDelta*cParam.rFreq*2.*PI___/C0___);
 	koef = (koef*koef/2.);
 	koef1 = (cParam.rFreq*2.*PI___*dT/2.);
@@ -1129,6 +1328,10 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 	}
 	else
 	{
+		/// З-2 (автор 29.10): поправок на конечную задержку шлейфа ДВЕ и они разные — для шлейфа КЗ (2.45), для шлейфа
+		/// ХХ (2.43) книги К. Н. Климова «Численное электродинамическое моделирование неоднородной плазмы» (гл. 2,
+		/// стр. 39–40); обе верны каждая для своего случая. Один общий koef1 для обоих шлейфов неверен, поэтому
+		/// поправка выключена (koef1 = 1). Включать — только раздельно для КЗ и ХХ.
 //		koef1 = koef1/tan( koef1 );found
 		koef1 = 1.;
 	};
@@ -1138,25 +1341,80 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 		csBuf.Format("Set node admitance");
 		PutTrace(csBuf);
 	};
+//		CString csBuf1;
+////		csBuf1.Format("pcNodeDielOne");
 
+	// Предупреждения (в консоль, строку состояния и итог расчёта), сами значения не меняются.
+	{	// B-6: positive epsilon together with the plasma (or with B) in one node - a warning, the code is not changed
+		double dEpsN = 0.0, dEpsB = 0.0, dEpsNeg = 0.0;
+		TmcIdx k;
+		for( k = 0; k < nNumNode; k++ )
+		{
+			if( !( prYNode[ k*6 ] > 0.0 ) ) continue;
+			if( fabs( prYNode[ k*6 + 1 ] ) > DBL_MIN )
+			{
+				dEpsN += 1.0;
+				if( prYNode[ k*6 ] - prYNode[ k*6 + 1 ]*koef_N > 0.0 ) dEpsNeg += 1.0;	// the equivalent N < 0
+			}
+			else if( fabs( prYNode[ k*6 + 4 ] ) > DBL_MIN ) dEpsB += 1.0;
+		};
+		if( dEpsN > 0.0 )
+		{
+			CString csW;
+			csW.Format("WARNING: %.0f nodes have a positive addition of epsilon and the plasma N at once - such a node is "
+				"calculated as a plasma, the addition of epsilon is right only at FREQ%s; put the dielectric and the plasma "
+				"in different nodes", dEpsN, ( dEpsNeg > 0.0 ) ? "; in some of them the addition is larger than the plasma part - "
+				"the equivalent concentration is negative and the calculation DIVERGES" : "" );
+			ConsolePrint( "%s", (LPCSTR)csW );
+			PutTrace( csW );
+			SetRunWarning( csW );
+		};
+		if( dEpsB > 0.0 )
+		{
+			CString csW;
+			csW.Format("WARNING: %.0f nodes have a positive addition of epsilon and the magnetic field B - B is not used "
+				"in a dielectric node (only in a plasma)", dEpsB );
+			ConsolePrint( "%s", (LPCSTR)csW );
+			PutTrace( csW );
+			SetRunWarning( csW );
+		};
+	};
+	// Ячейки узла до пересчёта: 0 — Delta eps, 1 — N (м^-3), 2 — Y, 3 — sigma (См/м), 4 — B (Тл).
 	for( i = 0, ii = 0, jj = 0; i < nNumNode; i++, ii+=6, jj++ )	
 	{
-//		y_line = prYNode[ii];
 		d_EpsAdd = prYNode[ ii ];
 		d_N_ElectronConcentr = prYNode[ ii + 1 ];
+		d_Y_Loss = prYNode[ ii + 2 ];
 		d_B_MagneticField = prYNode[ ii + 4 ];
+		// sigma (См/м) переходит в сеточные потери Y = 2*dT*sigma/eps0 (прибавляется к Y узла).
+		/// З-7 (автор 29.10): sigma в *_STAT_S — физическая проводимость, См/м; Y в *_STAT_Y / FILE_Y — уже
+		/// нормированная (сеточная) проводимость. Потери действуют и вне плазмы — среда с потерями (Рук. 2).
+		/// З-9 (автор 29.10): пересчёт как в узле H верен в смысле дуальной схемы — в X узел хранит Hz, импеданс
+		/// дуальной схемы совпадает с адмитансом исходной, затухание плоской волны то же. Модель плазмы — без
+		/// столкновений; связь sigma с частотой столкновений — план будущей разработки.
+		if( fabs( prYNode[ ii + 3 ] ) > 0.0 )	// B-20: sigma (S/m) of *_STAT_S -> Y = 2*dT*sigma/eps0 (through the grid step)
+		{
+			prYNode[ ii + 2 ] += (_real)( 2.*dT*prYNode[ ii + 3 ]/EPS0___ );
+			d_Y_Loss = prYNode[ ii + 2 ];
+			prYNode[ ii + 3 ] = (_real)(0.0);
+		};
 
+		// Z-8 (author 29.10): Delta eps and the plasma N that cancel exactly (the sum is 0) - the node is the vacuum
+		// (old: the plasma branch with wp^2 = 0 gave y5 = 0/0 at B = 0, NaN in the whole field).
+		/// З-8: если добавка диэлектрика и плазма в узле в сумме дали ровно 0, узел — вакуум (ветка диэлектрика).
+		if( ( fabs(d_N_ElectronConcentr) > DBL_MIN )&&( d_EpsAdd - d_N_ElectronConcentr*koef_N == 0.0 ) )
+		{
+			d_EpsAdd = 0.0;
+			d_N_ElectronConcentr = 0.0;
+		};
+		// Узел плазмы: Delta eps < 0 (eps < 1 моделируется эквивалентной плазмой) или задана N.
 		if( (d_EpsAdd < 0.0) || ( fabs(d_N_ElectronConcentr) > DBL_MIN ) )
 		{
-#ifdef _VERSION_EDUC___
-			{
-				CString csBuf1;
-				csBuf1.Format("Error for this version: Educational there is no opportunity to analyze areas with values permittivity by smaller value permittivity for free space. This opportunity is in the version: Professional. For reception of this version you can address in Tamic_soft group under a management Boris Vasilievich Sestroretsky." );
-				AfxMessageBox(csBuf1);
-				cError.PutErrorMessage(csBuf1);
-				return;
-			};
-#else
+			/// З-10 (автор 29.10): граница «плазма — плазма» и «плазма — диэлектрик» верна потому, что сетка —
+			/// соединение многополюсников ячеек: равенство напряжений клемм = непрерывность касательного E, закон
+			/// токов = условие для H (книга К. Н. Климова, раздел о граничных условиях).
+			// Delta eps и N сводятся к одной эквивалентной концентрации:
+			// wp^2 = N*e^2/(m*eps0) - Delta eps*omega^2; wc^2 = (e*B/m)^2.
 			if( fabs( d_N_ElectronConcentr ) > DBL_MIN )
 			{
 				d_EpsAdd -= d_N_ElectronConcentr*koef_N;
@@ -1164,6 +1422,9 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 			d_N_ElectronConcentr = -d_EpsAdd/koef_N;
 			d_wp2 = d_N_ElectronConcentr*koef_wp2;
 			d_WC2 = d_B_MagneticField*d_B_MagneticField*koef_WC2;
+			// Коэффициенты четырёхслойной схемы узла с подмагниченной плазмой, x = dT^2*(wc^2 + wp^2):
+			// Y1 = -dT^2*wp^4/(wc^2 + wp^2), Y3 = 8*dT^2*wc^2*wp^2/((wc^2 + wp^2)*(4 + x)),
+			// Y4 = 2*(4 - x)/(4 + x), Y5 = Y3*Y4/4, Y0 = 2/(4 + |Y1| + Y2 + Y3/2).
 			d_y5 = dT*dT*d_wp2*d_wp2/(d_WC2+d_wp2);
 			d_y6 = 4*d_WC2*d_wp2/((d_WC2+d_wp2)*(d_WC2+d_wp2));
 			d_y7 = dT*dT*d_WC2*d_wp2/(d_WC2+d_wp2);
@@ -1174,17 +1435,31 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 			}
 			else
 			{
-//				prYNode[ ii + 3 ] = (_real)(2*d_y6*d_y7/(d_y6+d_y7));
 				prYNode[ ii + 3 ] = (_real)(8*dT*dT*d_WC2*d_wp2/((d_WC2+d_wp2)*(4+dT*dT*(d_WC2+d_wp2))));
 			};
-			prYNode[ ii + 4 ] = (_real)(2*(dT*dT*(d_WC2+d_wp2)-4.)/(dT*dT*(d_WC2+d_wp2)+4.));
+			// B-1: the sign by formula (5.49): 2(4 - x)/(4 + x), x = dT^2*(wc^2 + wp^2) (26.10.2026).
+			// Old (the pole of the upper hybrid resonance at the Nyquist frequency - B only weakened the plasma);
+			// to return it, put this line back instead of the next one (and the old lines in PutTopology, B-1):
+			// prYNode[ ii + 4 ] = (_real)(2*(dT*dT*(d_WC2+d_wp2)-4.)/(dT*dT*(d_WC2+d_wp2)+4.));
+			prYNode[ ii + 4 ] = (_real)(2*(4.-dT*dT*(d_WC2+d_wp2))/(4.+dT*dT*(d_WC2+d_wp2)));
 			prYNode[ ii + 5 ] = (_real)(prYNode[ ii + 3 ]*prYNode[ ii + 4 ]/4.);
 			a = (4. + fabs( prYNode[ ii + 1 ] ) + prYNode[ ii + 2 ] + prYNode[ ii + 3 ]/2. );
 			prYNode[ ii ] =  (_real)(2./a);
-#endif
+//			{
+//				CString csBuf1;
+//				csBuf1.Format("SetDielInNodeList:\nd_EpsAdd = %lg;\nd_N_ElectronConcentr = %lg;\nd_wp2 = %lg;\nd_WC2 = %lg;\nd_y5 = %lg;d_y6 = %lg;d_y7 = %lg;",
+//					d_EpsAdd, d_N_ElectronConcentr, d_wp2, d_WC2,
+//					d_y5, d_y6, d_y7);
+//				AfxMessageBox(csBuf1);
+//			};
 		}
 		else
 		{
+			/// З-11 (автор 29.10): для ХХ (eps > 1) схема для волн E точно совпадает с H — отдельно не выводилась;
+			/// усложняется только случай КЗ (eps < 1) и подмагниченная плазма.
+			// Узел диэлектрика (Delta eps >= 0, N = 0): шлейф холостого хода Y1 = 4*Delta eps, плазменных
+			// слагаемых нет (Y3 = Y5 = 0, Y4 = -2); B такого узла не используется.
+			/// З-1 (автор 29.10): Delta eps в пределах 0,004 от 4 сдвигается до 3,996 / 4,004 — защита от расходимости схемы при Delta eps = 4.
 			if( fabs( d_EpsAdd - 4.) < 0.004 )
 			{
 				if( d_EpsAdd < 4. )	d_EpsAdd = (_ELEM_VAL_RTH)3.996;
@@ -1196,6 +1471,8 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 			prYNode[ ii + 5 ] = (_real)(0.0);
 			a = (4. + fabs( prYNode[ ii + 1 ] ) + prYNode[ ii + 2 ]);
 			prYNode[ ii ] =  (_real)(2./a);
+//		CString csBuf1;
+////		csBuf1.Format("pcNodeDielOne");
 		};
 		if( jj == 100000 )
 		{
@@ -1205,6 +1482,7 @@ void CTmcRTHRectNode::SetDielInNodeList( void )
 				PutStatistics(csBuf);
 			};
 			jj = 0;
+			if( !bIsReadData ) return;	// S-13: stopped (the window is closing) - do not go through all the nodes
 		};
 	};
 
@@ -1299,30 +1577,31 @@ void CTmcRTHRectNode::DeleteOutputFile( void )
 		cError.PutErrorMessage("Output field file name is NULL");
 		return;
 	};
-	remove(cOut->csFileNameField);
-	
 	if( cOut->csFileNameTopology.GetLength() == 0 )
 	{
 		cError.PutErrorMessage("Output field file name is NULL");
 		return;
 	};
-	remove(cOut->csFileNameTopology);
 
 	FILE *fp;
-	if( (fp = fopen( cOut->csFileName, "w")) == NULL )
+	CString csOpenErr;	// T-5: the .t is opened first and stays open (write denied to others) until the end of the step
+	if( (fp = TmcOutTOpen( cOut->csFileName, "w", csOpenErr )) == NULL )
 	{
-		cError.PutErrorMessage("Can't open output file for write data");
+		CString csOpenMsg;
+		csOpenMsg.Format("Can't open output file for write data. %s", (LPCSTR)csOpenErr);
+		cError.PutErrorMessage( csOpenMsg );
 		return;
 	};
+	remove(cOut->csFileNameField);
+	remove(cOut->csFileNameTopology);
+	// Заголовок .t: метка, имя, частота (Гц), число входов -2; дальше строки подтактов.
 	fprintf( fp, "%s\n!File name %s\n%s%lg\n%s%d\n!nT\tnBlock\tUp\tUo",
-		TMC_GROTS_FILEOUT_ID, 
+		TMC_GROTS_FILEOUT_ID,
 		(LPCTSTR)cOut->csFileName,
 		TMC_GROTS_FLOUTFreq_ID, cParam.rFreq,
 		TMC_GROTS_FLOUTInpNum_ID, -2);
-	fclose( fp );
+	fflush( fp );
 
-//	if( ( fp = fopen( cOut.csFileNameField , "w") ) == NULL ) return;
-//	fclose( fp );
 
 	return;
 }
@@ -1345,107 +1624,450 @@ void CTmcRTHRectNode::OutputnT( void )
 	char *psForm;
 	__int64 qTm = TmcTimingNow();				// TIMING
 
-	for( ; ( fp = fopen( cOut->csFileName , "a") ) == NULL;  ) 
+	CString csOpenErr;
+	if( ( fp = TmcOutTGet( cOut->csFileName ) ) != NULL ) fflush( fp );	// T-5: the file of the step is open; the line before goes to the disk
+	else if( ( fp = TmcOutTOpen( cOut->csFileName, "a", csOpenErr ) ) == NULL )	// after Stop - open it again (T-9: wait 20 s)
 	{
-		Sleep( 10 );
+		cError.PutErrorMessage( csOpenErr );
+		return;
 	};
 	
 
 
+	// Строка подтакта: перевод строки, номер такта и время; затем порты дописывают «блок Up Uo».
 	fprintf( fp, "\n");
 	psForm = GetnTFormat();
 	fprintf( fp, psForm, nTCurrent);
 	psForm = GetdTcurrentFormat();
 	fprintf( fp, psForm, dTCurrent);
 
-	fclose( fp );
 	m_cTiming.Add( TMCT_SIGNALFILE, qTm );		// TIMING
 	return;
 }
 
 /*
-near void CTmcRTHRectNode::RunScatteringNode1line1( _ELEM_VAL_RTH *pr1, _ELEM_VAL_RTH *pr2, float *prY, int *pnType1, int nx1, int nX11)
+near void CTmcRTHRectNode::RunScatteringNode1line( _ELEM_VAL_RTH *pr_111, float *prY_111, int *pnType_111, int nx_111, int nX_111)
 {
-	int i;
-	_ELEM_VAL_RTH ddd, *pr3, *pr4;
-
-	for( i = 0, pr3 = pr2 - nX11, pr4 = pr2 + nX11; i < nx1; i++, pr3++, pr4++ )
+	__asm
 	{
-//		pr1[0] = 2/(4+prY[0])*( pr1[-1] + pr1[1] + pr1[-nX11] + pr1[nX11] + prY[0]*pr1[0] ) - pr1[0];
-		pr1[i] = prY[i]*(pr2[i-1] + pr2[i+1] + pr3[0] + pr4[0] + prY[i]*pr2[i]) - pr1[i];
-	};
+		mov eax, pr_111
+		mov ecx, nX_111
+		mov edx, nx_111
+		mov ebx, prY_111
+metka1:
+		fld dword ptr [ebx+4]
+		fld qword ptr [eax-8]
+		fld qword ptr [eax+24]
+		fld qword ptr [eax+ecx+8]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+8]
+		fld qword ptr [eax+8]
+		fld dword ptr [ebx]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax]
+		fsub
+		fstp qword ptr [eax]
 
-//	for( i = 0; i < nx1; i++ )
-//	{
-//		pr1[0] = 2/(4+prY[0])*( pr1[-1] + pr1[1] + pr1[-nX11] + pr1[nX11] + prY[0]*pr1[0] ) - pr1[0];
-//		pr1[i] += pr2[i-1];
-//	};
+		fld dword ptr [ebx+12]
+		fld qword ptr [eax+8]
+		fld qword ptr [eax+40]
+		fld qword ptr [eax+ecx+24]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+24]
+		fld qword ptr [eax+24]
+		fld dword ptr [ebx+8]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+16]
+		fsub
+		fstp qword ptr [eax+16]
+
+		fld dword ptr [ebx+20]
+		fld qword ptr [eax+24]
+		fld qword ptr [eax+56]
+		fld qword ptr [eax+ecx+40]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+40]
+		fld qword ptr [eax+40]
+		fld dword ptr [ebx+16]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+32]
+		fsub
+		fstp qword ptr [eax+32]
+
+		fld dword ptr [ebx+28]
+		fld qword ptr [eax+40]
+		fld qword ptr [eax+72]
+		fld qword ptr [eax+ecx+56]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+56]
+		fld qword ptr [eax+56]
+		fld dword ptr [ebx+24]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+48]
+		fsub
+		fstp qword ptr [eax+48]
+
+		fld dword ptr [ebx+36]
+		fld qword ptr [eax+56]
+		fld qword ptr [eax+88]
+		fld qword ptr [eax+ecx+72]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+72]
+		fld qword ptr [eax+72]
+		fld dword ptr [ebx+32]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+64]
+		fsub
+		fstp qword ptr [eax+64]
+
+		lea eax, [eax + 80]
+
+		fld dword ptr [ebx+44]
+		fld qword ptr [eax-8]
+		fld qword ptr [eax+24]
+		fld qword ptr [eax+ecx+8]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+8]
+		fld qword ptr [eax+8]
+		fld dword ptr [ebx+40]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax]
+		fsub
+		fstp qword ptr [eax]
+
+		fld dword ptr [ebx+52]
+		fld qword ptr [eax+8]
+		fld qword ptr [eax+40]
+		fld qword ptr [eax+ecx+24]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+24]
+		fld qword ptr [eax+24]
+		fld dword ptr [ebx+48]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+16]
+		fsub
+		fstp qword ptr [eax+16]
+
+		fld dword ptr [ebx+60]
+		fld qword ptr [eax+24]
+		fld qword ptr [eax+56]
+		fld qword ptr [eax+ecx+40]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+40]
+		fld qword ptr [eax+40]
+		fld dword ptr [ebx+56]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+32]
+		fsub
+		fstp qword ptr [eax+32]
+
+		fld dword ptr [ebx+68]
+		fld qword ptr [eax+40]
+		fld qword ptr [eax+72]
+		fld qword ptr [eax+ecx+56]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+56]
+		fld qword ptr [eax+56]
+		fld dword ptr [ebx+64]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+48]
+		fsub
+		fstp qword ptr [eax+48]
+
+
+		fld dword ptr [ebx+76]
+		fld qword ptr [eax+56]
+		fld qword ptr [eax+88]
+		fld qword ptr [eax+ecx+72]
+		neg ecx
+		clc
+		fld qword ptr [eax+ecx+72]
+		fld qword ptr [eax+72]
+		fld dword ptr [ebx+72]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		lea ebx, [ebx + 80]
+		fld qword ptr [eax+64]
+		fsub
+		fstp qword ptr [eax+64]
+		
+//		lea eax, [eax + 80]
+
+
+		dec edx
+		ja metka1
+	}
 }
 
-near void CTmcRTHRectNode::RunScatteringNode1line( _ELEM_VAL_RTH *pr1, _ELEM_VAL_RTH *pr2, float *prY, int *pnType1, int nx1, int nX11)
+
+near void CTmcRTHRectNode::RunScatteringNode1line1( _ELEM_VAL_RTH *pr_111, float *prY_111, int *pnType_111, int nx_111, int nX_111)
 {
-	RunScatteringNode1line1( pr1, pr2, prY, pnType1, nx1, nX11);
-//									{
-//	csBuf1.Format("{nType(%p)=%d}", pnType1, pnType1[0] );
-//	AfxMessageBox(csBuf1);
-//									};
-		switch( pnType1[i] )
-		{
-											// if node is metal
-			case CTMCRTH_BLCKNTYPE_METAL :
-//								rrr = 0.0;
-								pr1[0] = 0.0;
-//								pr1[1] = 0.0;
-								break;
-											// if node is absorber
-			case CTMCRTH_BLCKNTYPE_ABSORBER :
-								break;
-			case CTMCRTH_BLCKNTYPE_EPS      : ;
-//								rrr = pr1[3]*( pr1[-4+1] + pr1[4+1] + pr1[-nX1+1] + pr1[nX1+1] + pr1[2]*pr1[1] ) - pr1[0];
-								pr1[0] = pr1[3]*( pr1[-4+1] + pr1[4+1] + pr1[-nX1+1] + pr1[nX1+1] + pr1[2]*pr1[1] ) - pr1[0];
-								break;
-											// if one dielectric
-			default:
-				cError.PutErrorMessage("Kernel: unknow node type %d", pnType1[0]);
-				return;
-				break;
-		};
-		pnType1++;
-//		pr1[0] = rrr;
-		pr1+=4;
-		j++;
+	__asm
+	{
+		mov eax, pr_111
+		mov ecx, nX_111
+		mov edx, nx_111
+		mov ebx, prY_111
+metka1:
+		fld dword ptr [ebx+4]
+		fld qword ptr [eax-16]
+		fld qword ptr [eax+16]
+		fld qword ptr [eax+ecx]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx]
+		fld qword ptr [eax]
+		fld dword ptr [ebx]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+8]
+		fsub
+		fstp qword ptr [eax+8]
 
-//		pr1[i] = 2./(4.+prY[i])*( pr2[i-1] + pr2[i+1] + pr2[i-nX11] + pr2[i+nX11] + prY[i]*pr2[i] ) - pr1[i];
-//		ddd = 2./(4.+prY[i])*( pr2[i-1] + pr2[i+1]);
+		fld dword ptr [ebx+12]
+		fld qword ptr [eax]
+		fld qword ptr [eax+32]
+		fld qword ptr [eax+ecx+16]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+16]
+		fld qword ptr [eax+16]
+		fld dword ptr [ebx+8]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+24]
+		fsub
+		fstp qword ptr [eax+24]
+
+		fld dword ptr [ebx+20]
+		fld qword ptr [eax+16]
+		fld qword ptr [eax+48]
+		fld qword ptr [eax+ecx+32]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+32]
+		fld qword ptr [eax+32]
+		fld dword ptr [ebx+16]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+40]
+		fsub
+		fstp qword ptr [eax+40]
+
+		fld dword ptr [ebx+28]
+		fld qword ptr [eax+32]
+		fld qword ptr [eax+64]
+		fld qword ptr [eax+ecx+48]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+48]
+		fld qword ptr [eax+48]
+		fld dword ptr [ebx+24]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+56]
+		fsub
+		fstp qword ptr [eax+56]
+
+		fld dword ptr [ebx+36]
+		fld qword ptr [eax+48]
+		fld qword ptr [eax+80]
+		fld qword ptr [eax+ecx+64]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+64]
+		fld qword ptr [eax+64]
+		fld dword ptr [ebx+32]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+72]
+		fsub
+		fstp qword ptr [eax+72]
+
+		lea eax, [eax + 80]
+
+		fld dword ptr [ebx+44]
+		fld qword ptr [eax-16]
+		fld qword ptr [eax+16]
+		fld qword ptr [eax+ecx]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx]
+		fld qword ptr [eax]
+		fld dword ptr [ebx+40]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+8]
+		fsub
+		fstp qword ptr [eax+8]
+
+		fld dword ptr [ebx+52]
+		fld qword ptr [eax]
+		fld qword ptr [eax+32]
+		fld qword ptr [eax+ecx+16]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+16]
+		fld qword ptr [eax+16]
+		fld dword ptr [ebx+48]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+24]
+		fsub
+		fstp qword ptr [eax+24]
+
+		fld dword ptr [ebx+60]
+		fld qword ptr [eax+16]
+		fld qword ptr [eax+48]
+		fld qword ptr [eax+ecx+32]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+32]
+		fld qword ptr [eax+32]
+		fld dword ptr [ebx+56]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+40]
+		fsub
+		fstp qword ptr [eax+40]
+
+		fld dword ptr [ebx+68]
+		fld qword ptr [eax+32]
+		fld qword ptr [eax+64]
+		fld qword ptr [eax+ecx+48]
+		neg ecx
+//		clc
+		fld qword ptr [eax+ecx+48]
+		fld qword ptr [eax+48]
+		fld dword ptr [ebx+64]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		fld qword ptr [eax+56]
+		fsub
+		fstp qword ptr [eax+56]
+
+
+		fld dword ptr [ebx+76]
+		fld qword ptr [eax+48]
+		fld qword ptr [eax+80]
+		fld qword ptr [eax+ecx+64]
+		neg ecx
+		clc
+		fld qword ptr [eax+ecx+64]
+		fld qword ptr [eax+64]
+		fld dword ptr [ebx+72]
+		fmul
+		fadd
+		fadd
+		fadd
+		fadd
+		fmul
+		lea ebx, [ebx + 80]
+		fld qword ptr [eax+72]
+		fsub
+		fstp qword ptr [eax+72]
+		
+//		lea eax, [eax + 80]
+
+
+		dec edx
+		ja metka1
+	}
 }
-//		pr1[ 0] = pr1[ 3]*(pr1[-3]+pr1[ 5]+pr1[ 1-nX_111]+pr1[ 1+nX_111]+pr1[ 1]*pr1[ 2])-pr1[ 0];
-//		pr1[ 4] = pr1[ 7]*(pr1[ 1]+pr1[ 9]+pr1[ 5-nX_111]+pr1[ 5+nX_111]+pr1[ 5]*pr1[ 6])-pr1[ 4];
-//		pr1[ 8] = pr1[11]*(pr1[ 5]+pr1[13]+pr1[ 9-nX_111]+pr1[ 9+nX_111]+pr1[ 9]*pr1[10])-pr1[ 8];
-//		pr1[12] = pr1[15]*(pr1[ 9]+pr1[17]+pr1[13-nX_111]+pr1[13+nX_111]+pr1[13]*pr1[14])-pr1[12];
-//		pr1[16] = pr1[19]*(pr1[13]+pr1[21]+pr1[17-nX_111]+pr1[17+nX_111]+pr1[17]*pr1[18])-pr1[16];
-//		pr1[20] = pr1[23]*(pr1[17]+pr1[25]+pr1[21-nX_111]+pr1[21+nX_111]+pr1[21]*pr1[22])-pr1[20];
-//		pr1[24] = pr1[27]*(pr1[21]+pr1[29]+pr1[25-nX_111]+pr1[25+nX_111]+pr1[25]*pr1[26])-pr1[24];
-//		pr1[28] = pr1[31]*(pr1[25]+pr1[33]+pr1[29-nX_111]+pr1[29+nX_111]+pr1[29]*pr1[30])-pr1[28];
-//		pr1[32] = pr1[35]*(pr1[29]+pr1[37]+pr1[33-nX_111]+pr1[33+nX_111]+pr1[33]*pr1[34])-pr1[32];
-//		pr1[36] = pr1[39]*(pr1[33]+pr1[41]+pr1[37-nX_111]+pr1[37+nX_111]+pr1[37]*pr1[38])-pr1[36];
-//		
-//		pr1[1] = prY2[1]*(pr2[0]+ pr2[2]+pr2[1-nX_111]+pr2[1+nX_111]+pr2[1]*prY1[1])-pr1[1];
-//		pr1[2] = prY2[2]*(pr2[1]+ pr2[3]+pr2[2-nX_111]+pr2[2+nX_111]+pr2[2]*prY1[2])-pr1[2];
-//		pr1[3] = prY2[3]*(pr2[2]+ pr2[4]+pr2[3-nX_111]+pr2[3+nX_111]+pr2[3]*prY1[3])-pr1[3];
-//		pr1[4] = prY2[4]*(pr2[3]+ pr2[5]+pr2[4-nX_111]+pr2[4+nX_111]+pr2[4]*prY1[4])-pr1[4];
-//		pr1[5] = prY2[5]*(pr2[4]+ pr2[6]+pr2[5-nX_111]+pr2[5+nX_111]+pr2[5]*prY1[5])-pr1[5];
-//		pr1[6] = prY2[6]*(pr2[5]+ pr2[7]+pr2[6-nX_111]+pr2[6+nX_111]+pr2[6]*prY1[6])-pr1[6];
-//		pr1[7] = prY2[7]*(pr2[6]+ pr2[8]+pr2[7-nX_111]+pr2[7+nX_111]+pr2[7]*prY1[7])-pr1[7];
-//		pr1[8] = prY2[8]*(pr2[7]+ pr2[9]+pr2[8-nX_111]+pr2[8+nX_111]+pr2[8]*prY1[8])-pr1[8];
-//		pr1[9] = prY2[9]*(pr2[8]+pr2[10]+pr2[9-nX_111]+pr2[9+nX_111]+pr2[9]*prY1[9])-pr1[9];
-//
-//		pr1[ 4] = prY1[ 5]*(pr1[-2+ 5]+ pr1[2+ 5]+pr1[-nX_111+ 5]+pr1[nX_111+ 5]+pr1[ 5]*prY1[ 4])-pr1[ 4];
-//		pr1[ 6] = prY1[ 7]*(pr1[-2+ 7]+ pr1[2+ 7]+pr1[-nX_111+ 7]+pr1[nX_111+ 7]+pr1[ 7]*prY1[ 6])-pr1[ 6];
-//		pr1[ 8] = prY1[ 9]*(pr1[-2+ 9]+ pr1[2+ 9]+pr1[-nX_111+ 9]+pr1[nX_111+ 9]+pr1[ 9]*prY1[ 8])-pr1[ 8];
-//		pr1[10] = prY1[11]*(pr1[-2+11]+ pr1[2+11]+pr1[-nX_111+11]+pr1[nX_111+11]+pr1[11]*prY1[10])-pr1[10];
-//		pr1[12] = prY1[13]*(pr1[-2+13]+ pr1[2+13]+pr1[-nX_111+13]+pr1[nX_111+13]+pr1[13]*prY1[12])-pr1[12];
-//		pr1[14] = prY1[15]*(pr1[-2+15]+ pr1[2+15]+pr1[-nX_111+15]+pr1[nX_111+15]+pr1[15]*prY1[14])-pr1[14];
-
 */
 
 void CTmcRTHRectNode::RunScatteringNode1line( _ELEM_VAL_RTH *pr1, _real *prY1, int nx_10, int nX_111)
@@ -1454,8 +2076,17 @@ void CTmcRTHRectNode::RunScatteringNode1line( _ELEM_VAL_RTH *pr1, _real *prY1, i
 	ii = nx_10;
 	_real r;
 
+	// Подтакт 0. Ячейки узла: 3 = U^(tau-1), 2 = U^(tau-2), 1 = U^(tau-3), 0 = U^(tau-4) -> U^tau;
+	// 4 = R^(tau-1), 5 = R^(tau-2) -> R^tau. R — сумма соседей, шлейф Y1 и потери Y2.
 	for( i = 0; i < ii; i++, pr1+=6, prY1+=6)
 	{
+//	{ 
+//		CString csBuf1;
+//		csBuf1.Format(" Node %d\n prY1[ 0 ] = %lg; prY1[ 1 ] = %lg; prY1[ 2 ] = %lg;\n prY1[ 3 ] = %lg; prY1[ 4 ] = %lg; prY1[ 5 ] = %lg;",
+//			i, 
+//			prY1[ 0 ], prY1[ 1 ], prY1[ 2 ],
+//			prY1[ 3 ], prY1[ 4 ], prY1[ 5 ]);
+////		csBuf1.Format("pcNodeDielOne");
 		r = pr1[-6 + 3]+ pr1[6 + 3]+pr1[-nX_111 + 3]+pr1[nX_111 + 3] + prY1[ 1]*pr1[ 3] + prY1[ 2]*pr1[ 2];
 		pr1[ 0] = -pr1[ 0] - 2*pr1[ 2] + prY1[ 4]*(pr1[ 1]+pr1[ 3])
 				+ prY1[ 0]*( 
@@ -1480,6 +2111,8 @@ void CTmcRTHRectNode::RunScatteringNode1line1( _ELEM_VAL_RTH *pr1, _real *prY1, 
 	ii = nx_10;
 	_real r;
 
+	// Подтакт 1. Ячейки: 0 = U^(tau-1), 3 = U^(tau-2), 2 = U^(tau-3), 1 -> U^tau;
+	// 5 = R^(tau-1), 4 = R^(tau-2) -> R^tau.
 	for( i = 0; i < ii; i++, pr1+=6, prY1+=6)
 	{
 		r = pr1[-6 + 0]+ pr1[6 + 0]+pr1[-nX_111 + 0]+pr1[nX_111 + 0] + prY1[ 1]*pr1[ 0] + prY1[ 2]*pr1[ 3];
@@ -1506,6 +2139,8 @@ void CTmcRTHRectNode::RunScatteringNode1line2( _ELEM_VAL_RTH *pr1, _real *prY1, 
 	ii = nx_10;
 	_real r;
 
+	// Подтакт 2. Ячейки: 1 = U^(tau-1), 0 = U^(tau-2), 3 = U^(tau-3), 2 -> U^tau;
+	// 4 = R^(tau-1), 5 = R^(tau-2) -> R^tau.
 	for( i = 0; i < ii; i++, pr1+=6, prY1+=6)
 	{
 		r = pr1[-6 + 1]+ pr1[6 + 1]+pr1[-nX_111 + 1]+pr1[nX_111 + 1] + prY1[ 1]*pr1[ 1] + prY1[ 2]*pr1[ 0];
@@ -1533,6 +2168,8 @@ void CTmcRTHRectNode::RunScatteringNode1line3( _ELEM_VAL_RTH *pr1, _real *prY1, 
 	ii = nx_10;
 	_real r;
 
+	// Подтакт 3. Ячейки: 2 = U^(tau-1), 1 = U^(tau-2), 0 = U^(tau-3), 3 -> U^tau;
+	// 5 = R^(tau-1), 4 = R^(tau-2) -> R^tau.
 	for( i = 0; i < ii; i++, pr1+=6, prY1+=6)
 	{
 		r = pr1[-6 + 2]+ pr1[6 + 2]+pr1[-nX_111 + 2]+pr1[nX_111 + 2] + prY1[ 1]*pr1[ 2] + prY1[ 2]*pr1[ 1];
@@ -1565,16 +2202,6 @@ void CTmcRTHRectNode::PutField( TmcIdx ii )	// INT64
 	
 	if( !cOut->bOutField ) return;
 
-	if( cOut->bOutFieldSinchronization )
-	{
-		for( i = 0; (IsFieldFileRead())&&(cOut->bOutFieldSinchronization)&&(cOut->bOutField)&&(bIsReadData)&&( i < 500 ) ; i++)	
-		{
-			Sleep(50);
-			cOut = cIndan.GetOutput();
-//			if( i == 50) return;
-		};
-	};
-
 	for( i = 0; ( fp = fopen( cOut->csFileNameField , "wb") ) == NULL; i++ ) 
 	{
 		if( i > 2000  ) return;
@@ -1592,12 +2219,12 @@ void CTmcRTHRectNode::PutField( TmcIdx ii )	// INT64
 						TMC_GROFLD_DOCFILE_ID_TimeUnit, (LPCTSTR)cParam.csTimeUnit, cParam.rTimeUnit, 13, 10,
 						TMC_GROFLD_DOCFILE_ID_nX, nX, 13, 10,
 						TMC_GROFLD_DOCFILE_ID_nY, nY);
+	// Кадр: строки снизу вверх, в строке слева направо; значение узла — ячейка ii, ii+6, ...
 	for( i = 0; i < nY; i++)
 	{
 		fprintf( fp, "%c%c", 13, 10);
 		for( j = 0; j < nX; j++ )
 		{
-//			fprintf( fp, GetdFieldOutFormat(), prUNode1[ii]);
 			if( strcmp( GetdFieldOutFormat(), "") == 0 )
 			{
 				fwrite( &(prUNode1[ii]), sizeof(_real), 1, fp );
@@ -1611,28 +2238,13 @@ void CTmcRTHRectNode::PutField( TmcIdx ii )	// INT64
 	};
 	
 	fclose(fp);
-	SetFileAttributes( cOut->csFileNameField, FILE_ATTRIBUTE_NORMAL );
 
-	if( IsDemoRun() ) 
-	{
-		RunOnViewField1();
-	};
 	
 	return;
 
 }
 
-void CTmcRTHRectNode::OnOffFieldOutput()
-{
-	cIndan.OnOffFieldOutput();
-	return;
-}
 
-void CTmcRTHRectNode::OnOffSinchronizationFieldOutput()
-{
-	cIndan.OnOffSinchronizationFieldOutput();
-	return;
-}
 
 void CTmcRTHRectNode::RunBlockNode()
 {
@@ -1690,29 +2302,9 @@ void CTmcRTHRectNode::RunBlockNode3()
 	return;
 }
 
-void CTmcRTHRectNode::PutStepEndSound()
-{
-	if( !((cIndan.GetOutput())->bSoundEffect) ) return;
-	int n;
-	n = cIndan.GetnStep();
-	if( n == cIndan.GetNStepMax() )
-	{
-		BeepAllEnd();
-		// RUN STATUS: the auto close after the last step is moved to CPlanRT_HDoc::RunAll
-		// (here it worked only with the sound on and closed the window before the end of the run)
-		return;
-	};
-	BeepStepEnd( n );
-	return;
-}
 
 
 
-void CTmcRTHRectNode::OnOffSoundEffects()
-{
-	cIndan.OnOffSoundEffects();
-	return;
-}
 
 void CTmcRTHRectNode::PutTopology()
 {
@@ -1772,6 +2364,7 @@ void CTmcRTHRectNode::PutTopology()
 		for( j = 0; j < nX; j++ )
 		{
 //			fprintf( fp, GetdFieldOutFormat(), prYNode1[0]);
+			// Обратный пересчёт шлейфа Y1 в полную eps: Y1/4 + 1 (диэлектрик) или Y1/(omega*dT)^2 + 1 (плазма).
 			dBuf = prYNode[ii];
 			if( dBuf >= 0. ) dBuf /= 4.;
 			else dBuf /= koef;
@@ -1795,7 +2388,6 @@ void CTmcRTHRectNode::PutTopology()
 		fprintf( fp, "%c%c", 13, 10);
 		for( j = 0; j < nX; j++ )
 		{
-//			fprintf( fp, GetdFieldOutFormat(), prYNode1[0]);
 			dBuf = prYNode[ii+1];
 			if( dBuf >= 0. ) 
 			{
@@ -1803,13 +2395,24 @@ void CTmcRTHRectNode::PutTopology()
 			}
 			else 
 			{
+					// B-1: the inverse for the new sign of Y4 = 2(4-x)/(4+x): x = 4(2-Y4)/(2+Y4), wp^2 = sqrt(|Y1|*x)/dT^2.
+					// Old (for the old sign):
+					//   dy_4 = prYNode[ii+4]; dy_5 = fabs( dBuf ); dAlf = (1.-dy_4); if( fabs(dAlf) < DBL_MIN ) dAlf = DBL_MIN;
+					//   dAlf = (1.+dy_4)/dAlf; dwp2 = 2*sqrt(-dy_5*dAlf)/(dT2);
 					dy_4 = prYNode[ii+4];
 					dy_5 = fabs( dBuf );
-					dAlf = (1.-dy_4);
+					dAlf = 2. + dy_4;
 					if( fabs(dAlf) < DBL_MIN ) dAlf = DBL_MIN;
-					dAlf = (1.+dy_4)/dAlf;
-					dwp2 = 2*sqrt(-dy_5*dAlf)/(dT2);
+					dAlf = 4.*(2. - dy_4)/dAlf;		// x = dT^2*(wc^2 + wp^2)
+					dwp2 = sqrt( dy_5*fabs(dAlf) )/dT2;
+//					{
+//						CString csBuf1;
+//						csBuf1.Format( "dy_4 = %lg;\ndy_5 = %lg;\nAlf = %lg;\ndT2 = %lg;\ndwp2 = %lg;\nkoef_N = %lg;\nN = %lg;\n" ,
+//							dy_4, dy_5, dAlf, dT2, dwp2, koef_N, dwp2*koef_N);
+//						AfxMessageBox(csBuf1);
+//					};
 			};
+			// N = wp^2*eps0*m/e^2, м^-3 (в узле диэлектрика 0).
 			dBuf = dwp2*koef_N;
 			if( strcmp( GetdFieldOutFormat(), "") == 0 )
 			{
@@ -1830,7 +2433,6 @@ void CTmcRTHRectNode::PutTopology()
 		fprintf( fp, "%c%c", 13, 10);
 		for( j = 0; j < nX; j++ )
 		{
-//			fprintf( fp, GetdFieldOutFormat(), prYNode1[0]);
 			dBuf = prYNode[ii];
 			if( strcmp( GetdFieldOutFormat(), "") == 0 )
 			{
@@ -1851,23 +2453,23 @@ void CTmcRTHRectNode::PutTopology()
 		fprintf( fp, "%c%c", 13, 10);
 		for( j = 0; j < nX; j++ )
 		{
-//			fprintf( fp, GetdFieldOutFormat(), prYNode1[0]);
 			dBuf = prYNode[ii+1];
 			if( dBuf >= 0. ) dBuf = 0.0;
 			else 
 			{
+				// B-1: the inverse for the new sign: x = 4(2-Y4)/(2+Y4), wp^2 = sqrt(|Y1|*x)/dT^2, wc^2 = x/dT^2 - wp^2.
+				// Old (for the old sign):
 				dy_4 = prYNode[ii+4];
 				dy_5 = fabs( dBuf );
-				dAlf = (1.-dy_4);
+				dAlf = 2. + dy_4;
 				if( fabs(dAlf) < DBL_MIN ) dAlf = DBL_MIN;
-				dAlf = (1.+dy_4)/dAlf;
-				dwp2 = 2*sqrt(-dy_5*dAlf)/(dT2);
-				dWc2 = 2*prYNode[ii+3]*(dAlf+1)*(dAlf)/(dwp2*dT2*dT2);
-//				dWc2 = (4*dAlf-2*dwp2*dT2)/dT2;
+				dAlf = 4.*(2. - dy_4)/dAlf;		// x = dT^2*(wc^2 + wp^2)
+				dwp2 = sqrt( dy_5*fabs(dAlf) )/dT2;
+				dWc2 = fabs(dAlf)/dT2 - dwp2;
 				if( dWc2 < 0. ) dWc2 = DBL_MIN;
+				// B = wc*m/e, Тл.
 				dBuf = sqrt( dWc2 )*koef_B;
 			};
-//			dBuf = prYNode[ii+3];
 			if( strcmp( GetdFieldOutFormat(), "") == 0 )
 			{
 				fwrite( &(dBuf), sizeof(double), 1, fp );
@@ -1885,47 +2487,24 @@ void CTmcRTHRectNode::PutTopology()
 	return;
 }
 
-void CTmcRTHRectNode::PutTopol()
-{
-	PutTopology();
-	cIndan.GetOutput()->bOutTopology = !cIndan.GetOutput()->bOutTopology;
-	PutSinchronizFlag( cIndan.GetOutput()->bOutTopology, cIndan.GetOutput()->bOutField, cIndan.GetOutput()->bOutFieldSinchronization);
-	PutTopology();
-	return;
-}
 
-BOOL CTmcRTHRectNode::GetSinchronizationFieldOutput()
-{
-	return cIndan.GetOutput()->bOutFieldSinchronization;
-}
 
-BOOL CTmcRTHRectNode::GetFieldFlag()
-{
-	return cIndan.GetOutput()->bOutField;
-}
 
-BOOL CTmcRTHRectNode::GetSoundEffect()
-{
-	return cIndan.GetOutput()->bSoundEffect;
-}
 
-BOOL CTmcRTHRectNode::GetTopologyFlag()
-{
-	return cIndan.GetOutput()->bOutTopology;
-}
 
-BOOL CTmcRTHRectNode::IsFieldFileRead()
-{
-	CTmcRTH_IndanOutput* cOut;
-	cOut = cIndan.GetOutput();
-	if( GetFileAttributes( cOut->csFileNameField ) == 0xFFFFFFFF ) return FALSE;
-	if( GetFileAttributes( cOut->csFileNameField ) != FILE_ATTRIBUTE_ARCHIVE ) return TRUE;
-	return FALSE;
-}
 
 void CTmcRTHRectNode::PutSmatrix()
 {
+	TmcOutTFlush( cIndan.GetOutput()->csFileName );	// T-5: the S-matrix reads the .t from the disk
 	cIndan.GetOutput()->PutSmatrix();
+	if( ( !cError.IsError() )&&( cIndan.GetOutput()->csSMatrixError.GetLength() > 0 ) )	// A-21
+		cError.PutErrorMessage( cIndan.GetOutput()->csSMatrixError );
+	if( cIndan.GetOutput()->csSMatrixWarning.GetLength() > 0 )	// B-22: the response has not died away
+	{
+		ConsolePrint( "WARNING: %s", (LPCSTR)cIndan.GetOutput()->csSMatrixWarning );
+		SetRunWarning( cIndan.GetOutput()->csSMatrixWarning );
+		PutTrace( cIndan.GetOutput()->csSMatrixWarning );
+	};
 	return;
 }
 
@@ -1938,7 +2517,8 @@ void CTmcRTHRectNode::DistributionIntegrated( int ii )
 			cIndan.GetOutput()->GetFieldIntegrated().GetTmin(),
 			cIndan.GetOutput()->GetFieldIntegrated().GetTmax() );	// TIMING
 	cIndan.GetOutput()->GetFieldIntegrated().Integrate( dTCurrent, nTCurrent, &(prUNode1[ii]) );
-	cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
+	if( cIndan.GetOutput()->GetFieldIntegrated().GetError().IsError() )	// A-1: ne zatirat oshibku podtakta
+		cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
 	m_cTiming.Add( bTmFinal ? TMCT_DISTRFINAL : TMCT_DISTRINTEGR, qTm );	// TIMING
 	return;
 }
@@ -1946,9 +2526,9 @@ void CTmcRTHRectNode::DistributionIntegrated( int ii )
 void CTmcRTHRectNode::ExportToDirectionalPatter()
 {
 	cIndan.GetOutput()->GetFieldIntegrated().ExportToDirectionalPattern(cParam);
-	cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
-	if( cError.IsError() )
+	if( cIndan.GetOutput()->GetFieldIntegrated().GetError().IsError() )	// A-1: ne zatirat oshibku rascheta
 	{
+		cError = cIndan.GetOutput()->GetFieldIntegrated().GetError();
 		CString csBuf;
 		csBuf.Format("Export to Directional pattern error:%s", cError.GetErrorMessage());
 		PutTrace(csBuf);
@@ -1981,9 +2561,13 @@ void CTmcRTHRectNode::PutPortInfo( void )
 	if( nPort < 1 ) return;
 
 	FILE *fp;
-	for( ; ( fp = fopen( cOut->csFileName, "a" ) ) == NULL ; )
+	CString csOpenErr;
+	if( ( fp = TmcOutTGet( cOut->csFileName ) ) == NULL )	// T-5: the file of the step is open
+		fp = TmcOutTOpen( cOut->csFileName, "a", csOpenErr );
+	if( fp == NULL )
 	{
-		Sleep( 10 );
+		cError.PutErrorMessage( csOpenErr );
+		return;
 	};
 
 	fprintf( fp, "\n%s%d", TMC_GROTS_FLOUTWideband_ID, ( nWide > 0 ) ? 1 : 0 );
@@ -2022,6 +2606,6 @@ void CTmcRTHRectNode::PutPortInfo( void )
 			cParam.rFreq,
 			pcNodeDiel[i].IsSignalFromFile() ? 1 : 0 );
 	};
-	fclose( fp );
-	return;
+	return;		// T-5: the file stays open
 }
+

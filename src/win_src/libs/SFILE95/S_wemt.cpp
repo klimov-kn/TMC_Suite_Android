@@ -17,21 +17,25 @@
  *
  */
 
-#include <windows.h>
+/// @file s_wemt.cpp
+/// @brief Запись одного столбца S-матрицы на одной частоте в S-файл (`save_S_matrix_element`).
+///
+/// Часть модуля «Библиотека sfile95». Через эту функцию счётные ядра и вьюверы
+/// TMCROS и TMC_DN строят S-файл по столбцам: каждый расчёт с возбуждением
+/// одного входа даёт один столбец. Функция объявлена и описана в `proc_s.h`.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#save-column
+
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 
-#include <Typedef.h>
-#include <FRQDATA.H>
-#include <COMPLEX1.H>
-#include <TMC_LIB.H>
-#include <TMCLIMIT.H>
-#include <S_file.h>
-#include <Error1.h>
-#include "ERROR2.H"
-#include <Proc_s.h>
-#include <YS_PROC.H>
+#include <typedef.h>
+#include <frqdata.h>
+#include <tmc_lib.h>
+#include <tmclimit.h>
+#include <s_file.h>
+#include <error1.h>
+#include <proc_s.h>
 
 
 int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, int nInput)
@@ -50,20 +54,34 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
    int i, j, i1, j1, ii, k, kol1, kol;
    int ii1;
    BOOL bIsFreqInMatrix = FALSE;
+   BOOL bStructBad = FALSE;	// S-36
    char ch[] = "Tamic Output Signal Viewer";
    char filename1[1000];
    int ret_code = 0;
 
+   if( ( nInput < 1 )||( nInput > MAX_INPUT_NUM ) ) return -1;	/* A-22: ne bolshe MAX_INPUT_NUM portov */
    sprintf( filename1, "%s$", filename );
 
-//   getch();
    sss1 = NULL;
 
    if( read_S_matrix( filename, &si, &extrapol_flag, &sss1,  &frq, &id ) != 0 )
    {
+	   // A-24: an existing non-empty file that can't be read is not overwritten
+	   FILE *fpExist = fopen( filename, "rb" );
+	   if( fpExist != NULL )
+	   {
+		   long lExist;
+		   fseek( fpExist, 0L, SEEK_END );
+		   lExist = ftell( fpExist );
+		   fclose( fpExist );
+		   if( lExist > 0 ) return -2;
+	   }
 	   // can't read s-matrix file
 	   // create new s-matrix file
+	   // f1 (Гц) задаётся в ГГц: текущие единицы глобальной таблицы должны быть ГГц
 	   set_frequency( f1*(1.e-9), 0.0, 1 );
+	   // I-13: f1 is in Hz; f1*1e-9 is right only for the units GHz - otherwise the point is set in Hz directly
+	   if( get_frq_unit( get_frq_item_code() ) != (_real)(1.e9) ) set_frq_element( (_real)f1, 0 );
        set_current_frq_num( 0 );
 	   extrapol_flag = 0;
 	   id1.num = nInput;
@@ -78,6 +96,7 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 	   {
 		   return -1;
 	   };
+	   // незаполненные элементы помечаются FLT_MAX
 	   for( i = 0, ii = 0; i < id1.num ; i++ ) 
 	   {
 		   for( j = 0; j < id1.num; j++ )
@@ -87,6 +106,7 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 			   ii++;
 		   };
 	   };
+	   // столбец in1: элемент (ii1, in1-1) лежит по индексу (in1-1) + ii1*dim
 	   for( i = 0, ii = 0; i < id1.num ; i++ ) 
 	   {
 		   for( j = 0; j < id1.num; j++ )
@@ -110,6 +130,7 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
    }
    else
    {
+		// поиск частоты f1 в файле; при совпадении столбец заменяется на месте
 		for( k = 0; k < frq.max; k++ )
 		{
 		  lpxS1 = sss1[k];
@@ -129,7 +150,12 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 					   {
 							if( fabs( ( frq.f[k] - f1 )/f1 ) < (1.e-15) )
 							{
+								int m;
 								bIsFreqInMatrix = TRUE;
+								// S-36: the column is put by the port number - only one mode per port and the same ports
+								if( ( id[k].num != nInput )||( id[k].dim < nInput ) ) bStructBad = TRUE;
+								for( m = 0; m < id[k].num; m++ ) if( id[k].array[m] != 1 ) bStructBad = TRUE;
+								if( !bStructBad )
 								for( ii1 = 0; ii1 < nInput ; ii1++ )
 								{
 									lpxS1[ii+ii1*id[k].dim] = sss[ii1];
@@ -142,9 +168,20 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 	           }; //end of first loop over modes
 	        }; //end of first loop over inputs
 		};
+		if( bStructBad )	// S-36: the file keeps its data, the run gets "error when save"
+		{
+			Free_GRID_Index( &si, extrapol_flag );
+			free_mem( frq.f );
+			free_mem( id );
+			Free_S_read( &sss1, frq.max );
+			return -1;
+		};
+		// новой частоты нет в файле: она пишется во временный файл <имя>$ и сливается S_add
 		if( !bIsFreqInMatrix )
 		{
 		   set_frequency( f1*(1.e-9), 0.0, 1 );
+		   // I-13: the same as above - not GHz: the frequency in Hz directly
+		   if( get_frq_unit( get_frq_item_code() ) != (_real)(1.e9) ) set_frq_element( (_real)f1, 0 );
 	       set_current_frq_num( 0 );
 		   extrapol_flag = 0;
 		   id1.num = nInput;
@@ -163,6 +200,7 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 			  Free_S_read( &sss1, frq.max );
 			  return -1;
 		   };
+	   // незаполненные элементы помечаются FLT_MAX
 	   for( i = 0, ii = 0; i < id1.num ; i++ ) 
 	   {
 		   for( j = 0; j < id1.num; j++ )
@@ -172,6 +210,7 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
 			   ii++;
 		   };
 	   };
+	   // столбец in1: элемент (ii1, in1-1) лежит по индексу (in1-1) + ii1*dim
 	   for( i = 0, ii = 0; i < id1.num ; i++ ) 
 	   {
 		   for( j = 0; j < id1.num; j++ )
@@ -209,12 +248,11 @@ int save_S_matrix_element( int in1, char *filename, _complex *sss, double f1, in
             {
              set_current_frq_num( i );
              set_frq_element( frq.f[i], i );
-             if( ret_code == 0 ) ret_code = save_S_matrix( sss1[i], id, filename, si, extrapol_flag );
+             if( ret_code == 0 ) ret_code = save_S_matrix( sss1[i], &id[i], filename, si, extrapol_flag );	// A-3: id[i]
             }
 		};
 	};
 
-//  getch();
   Free_GRID_Index( &si, extrapol_flag );
   free_mem( frq.f );
   free_mem( id );

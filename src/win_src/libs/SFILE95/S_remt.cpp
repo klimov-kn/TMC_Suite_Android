@@ -20,20 +20,26 @@
  *
  */
 
+/// @file s_remt.cpp
+/// @brief Чтение частотной зависимости одного элемента S-матрицы из S-файла TMC и текстовых файлов HFSS и CST.
+///
+/// Часть модуля «Библиотека sfile95». Точка входа для вьювера TMCGROUT —
+/// `read_S_matrix_element` (пробует форматы по очереди). Шапка выше досталась
+/// от другого файла TAMIC и содержимому не соответствует. Функции объявлены
+/// и описаны в `proc_s.h` и `s_file.h`; здесь описана только `ChooseString1`.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#import
+
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 
-#include <Typedef.h>
-#include <FRQDATA.H>
-#include <COMPLEX1.H>
-#include <TMC_LIB.H>
-#include <TMCLIMIT.H>
-#include <S_file.h>
-#include <Error1.h>
-#include "ERROR2.H"
-#include <Proc_s.h>
-#include <YS_PROC.H>
+#include <typedef.h>
+#include <frqdata.h>
+#include <tmc_lib.h>
+#include <tmclimit.h>
+#include <s_file.h>
+#include <error1.h>
+#include <proc_s.h>
 
 int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *filename, _complex **sss, double **f1, int *nPoint)
   {
@@ -49,12 +55,12 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
    int i, j, i1, j1, ii, k, kol1, kol;
    int nP;
 
-//   getch();
    *nPoint = -1;
    sss1 = NULL;
 
    if( read_S_matrix( filename, &si, &extrapol_flag, &sss1,  &frq, &id ) != 0 ) return -1;
 
+   // номера входов ограничиваются по первой частоте, наличие мод проверяется на каждой
    /* calculation nPoint for in1 mod1 in2 mod2 */
 	if( *in1 < 1 )	 *in1 = 1;
 	if( *in2 < 1 )	 *in2 = 1;
@@ -63,13 +69,15 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
 	if( *in1 > id[0].num ) *in1 = id[0].num;
 	if( *in2 > id[0].num ) *in2 = id[0].num;
 
-	for( k = 0, nP = 0; k < frq.max; k++ )
+	for( k = 0, nP = 0; ( k < frq.max )&&( *in1 >= 1 )&&( *in2 >= 1 ); k++ )	// N-31: num == 0 -> array[-1]
 	{
-		if( (*mod1 <= id[k].array[*in1-1])&&(*mod2 <= id[k].array[*in2-1]) ) nP++;
+		if( ( *in1 <= id[k].num )&&( *in2 <= id[k].num )&&	// N-31: nomer vhoda - po id[k], ne po id[0]
+			(*mod1 <= id[k].array[*in1-1])&&(*mod2 <= id[k].array[*in2-1]) ) nP++;
 	};
 	if( nP == 0 )
 	{
 	   Free_GRID_Index( &si, extrapol_flag );
+	   free_mem( frq.f );	// N-31: utechka
 	   free_mem( id );
 	   Free_S_read( &sss1, frq.max );
 	   return -1;
@@ -79,6 +87,7 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
    if( ( s = new _complex[nP] ) == NULL )
    {
 	   Free_GRID_Index( &si, extrapol_flag );
+	   free_mem( frq.f );	// N-31: utechka
 	   free_mem( id );
 	   Free_S_read( &sss1, frq.max );
 	   return -1;
@@ -88,6 +97,7 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
    {
 	   delete []s;
 	   Free_GRID_Index( &si, extrapol_flag );
+	   free_mem( frq.f );	// N-31: utechka
 	   free_mem( id );
 	   Free_S_read( &sss1, frq.max );
 	   return -1;
@@ -96,10 +106,12 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
    /* loop over frequencies */
    for( k = 0, nP = 0; k < frq.max; k++ )
      {
-	  if( (*mod1 <= id[k].array[*in1-1])&&(*mod2 <= id[k].array[*in2-1]) )
+	  if( ( *in1 <= id[k].num )&&( *in2 <= id[k].num )&&	// N-31
+		  (*mod1 <= id[k].array[*in1-1])&&(*mod2 <= id[k].array[*in2-1]) )
 	  {
 	  lpxS1 = sss1[k];
 	  f[nP] = frq.f[k];
+      // ii — линейный индекс элемента в матрице, хранимой по строкам
       /* first loop over inputs */
 
       for( i = 0, ii = 0; i < id[k].num; i++ )
@@ -113,7 +125,7 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
                /* second loop over modes */
                for( j1 = 0, kol = id[k].array[i1]; j1 < kol; j1++ )
                  {
-				   if( (i==(*in1-1))&&(j==(*mod1-1))&&(i1==(*in2-1))&&(j1==(*mod2-1)) )
+				   if( (i==(*in1-1))&&(j==(*mod1-1))&&(i1==(*in2-1))&&(j1==(*mod2-1))&&( ii < id[k].dim*id[k].dim ) )	// N-31
 				   {
 					   s[nP] = lpxS1[ii];
 				   };
@@ -127,7 +139,6 @@ int read_S_matrix_element_TMC( int *in1, int *mod1, int *in2, int *mod2, char *f
 	  };
      }; /* end frequency loop */
 
-//  getch();
   Free_GRID_Index( &si, extrapol_flag );
   free_mem( frq.f );
   free_mem( id );
@@ -262,15 +273,12 @@ int ChooseString( char *pszBuf, const char *pszIdentifInput, const char *pszIden
 	{
 		if( strncmp( pszBuf + i, pszIdentifInput, strlen(pszIdentifInput) ) == 0)
 		{
-//			PutStatistics111(pszBuf + i);
 			for( j = 0; pszBuf[ j ] != '\0'; j++ )
 			{
 				if( strncmp( pszBuf + j, pszIdentifMode, strlen(pszIdentifMode) ) == 0)
 				{
 					pszBuf[ j ] = '\0';
-//					PutStatistics111(pszBuf + i + strlen(pszIdentifInput));
 					sscanf( pszBuf + i + strlen(pszIdentifInput), "%d", pnInp );
-//					PutStatistics111(pszBuf + j + strlen(pszIdentifMode));
 					sscanf( pszBuf + j + strlen(pszIdentifMode), "%d", pnMod );
 					return 1;
 				};
@@ -282,6 +290,17 @@ int ChooseString( char *pszBuf, const char *pszIdentifInput, const char *pszIden
 }
 
 
+/// @brief Разбирает пару «вход, мода» по двум меткам и возвращает, где продолжить поиск.
+///
+/// То же, что `ChooseString`, но возвращает позицию за меткой моды — для
+/// последовательного разбора нескольких столбцов в одной строке заголовка CST
+/// (`WavePort<вход>):Mode(<мода>`).
+/// @param[in,out] pszBuf           строка; портится (в место метки моды пишется '\0')
+/// @param[in]     pszIdentifInput  метка входа (CST: "WavePort")
+/// @param[in]     pszIdentifMode   метка моды (CST: "):Mode(")
+/// @param[out]    pnInp            номер входа
+/// @param[out]    pnMod            номер моды
+/// @return Смещение от `pszBuf` за меткой моды (> 0) — пара найдена; 0 — нет.
 int ChooseString1( char *pszBuf, const char *pszIdentifInput, const char *pszIdentifMode, int *pnInp, int *pnMod )
 {
 	int i, j;
@@ -290,15 +309,12 @@ int ChooseString1( char *pszBuf, const char *pszIdentifInput, const char *pszIde
 	{
 		if( strncmp( pszBuf + i, pszIdentifInput, strlen(pszIdentifInput) ) == 0)
 		{
-//			PutStatistics111(pszBuf + i);
 			for( j = 0; pszBuf[ j ] != '\0'; j++ )
 			{
 				if( strncmp( pszBuf + j, pszIdentifMode, strlen(pszIdentifMode) ) == 0)
 				{
 					pszBuf[ j ] = '\0';
-//					PutStatistics111(pszBuf + i + strlen(pszIdentifInput));
 					sscanf( pszBuf + i + strlen(pszIdentifInput), "%d", pnInp );
-//					PutStatistics111(pszBuf + j + strlen(pszIdentifMode));
 					sscanf( pszBuf + j + strlen(pszIdentifMode), "%d", pnMod );
 					return j + strlen(pszIdentifMode);
 				};
@@ -324,7 +340,7 @@ int SMatrixElementHFSS_FreqArray( int *in1, int *mod1, int *in2, int *mod2, char
 } 
 
 // calculation point in frequence array
-void SMatrixElementHFSS_FreqArrayCalculation( char *filename, double ** /*f1*/, int *nPoint, int *nMatrixSize)
+void SMatrixElementHFSS_FreqArrayCalculation( char *filename, double **f1, int *nPoint, int *nMatrixSize)
 {
 	*nPoint = -1;
 
@@ -369,7 +385,7 @@ void SMatrixElementHFSS_FreqArrayCalculation( char *filename, double ** /*f1*/, 
 							{
 								for( j = 0; j < (*nMatrixSize)*(*nMatrixSize); j++ )
 								{
-									fscanf( fp, "%lg%lg", &dBuf, &dBuf1);
+									(void)!fscanf( fp, "%lg%lg", &dBuf, &dBuf1);
 								};
 							};
 							delete []ch;
@@ -381,8 +397,6 @@ void SMatrixElementHFSS_FreqArrayCalculation( char *filename, double ** /*f1*/, 
 		};
 	};
 
-//	sprintf( ch, "nMatrixSize = %d; nPoint = %d", i, j );
-//	PutStatistics111( ch );
 
 	delete []ch;
 	fclose( fp );
@@ -458,12 +472,13 @@ void SMatrixElementHFSS_FreqArrayRead( int *in1, int *mod1, int *in2, int *mod2,
 		delete []f;
 		*f1 = NULL;
 		delete []s;
-		*sss = NULL;
+		*sss = NULL; *nPoint = -1;	// S-34
 		delete []ch;
 		fclose( fp );
 		return;
 	};
 
+	// индекс элемента в записи частоты: матрица по строкам в порядке строк "-> P.. M.."
 	k = nInpMod1*( *nMatrixSize ) + nInpMod2;
 	for( i = 0; i < ( *nPoint ) ; i++ )
 	{
@@ -472,14 +487,13 @@ void SMatrixElementHFSS_FreqArrayRead( int *in1, int *mod1, int *in2, int *mod2,
 			delete []f;
 			*f1 = NULL;
 			delete []s;
-			*sss = NULL;
+			*sss = NULL; *nPoint = -1;	// S-34
 			delete []ch;
 			fclose( fp );
 			return;
 		};
+		// частоты HFSS в ГГц -> Гц
 		f[ i ] *= 1000000000.;
-//		sprintf( ch, "Frequence [ %d ] = %lg; nMatrixSize = %d", i, f[ i ], *nMatrixSize );
-//		PutStatistics111( ch );
 		for( j = 0; j < ( *nMatrixSize )*( *nMatrixSize ); j++ )
 		{
 			if( fscanf( fp, "%lg%lg", &dBuf, &dBuf1 ) != 2)
@@ -487,7 +501,7 @@ void SMatrixElementHFSS_FreqArrayRead( int *in1, int *mod1, int *in2, int *mod2,
 				delete []f;
 				*f1 = NULL;
 				delete []s;
-				*sss = NULL;
+				*sss = NULL; *nPoint = -1;	// S-34
 				delete []ch;
 				fclose( fp );
 				return;
@@ -562,9 +576,7 @@ int SMatrixElementCST_InpMax( char *filename )
 		return -1;
 	};
 
-//	for( ; fgets( ch, nSize, fp )!= NULL; )
-//	{
-		fgets( ch, nSize, fp );
+		(void)!fgets( ch, nSize, fp );
 		for( i = 0, j = 0; (j = ChooseString1( ch + i, "WavePort", "):Mode(", &nInp, &nMod )) > 0; i += j ) ;
 //		;
 //	};
@@ -595,7 +607,7 @@ int SMatrixElementCST_ModMax( char *filename, int *pnInp )
 	};
 
 
-	fgets( ch, nSize, fp );
+	(void)!fgets( ch, nSize, fp );
 	for( i = 0, j = 0; (j = ChooseString1( ch + i, "WavePort", "):Mode(", &nInp, &nMod )) > 0; i += j )
 	{
 		if( (*pnInp) == nInp ) nModInp = nMod;
@@ -625,7 +637,7 @@ int SMatrixElementCST_FreqArray( int *in1, int *mod1, int *in2, int *mod2, char 
 
 
 // calculation point in frequence array
-void SMatrixElementCST_FreqArrayCalculation( char *filename, double ** /*f1*/, int *nPoint, int *nMatrixSize)
+void SMatrixElementCST_FreqArrayCalculation( char *filename, double **f1, int *nPoint, int *nMatrixSize)
 {
 	*nPoint = -1;
 
@@ -676,8 +688,6 @@ void SMatrixElementCST_FreqArrayCalculation( char *filename, double ** /*f1*/, i
 		};
 	};
 
-//	sprintf( ch, "nMatrixSize = %d; nPoint = %d", i, j );
-//	PutStatistics111( ch );
 
 	delete []ch;
 	fclose( fp );
@@ -744,22 +754,34 @@ void SMatrixElementCST_FreqArrayRead( int *in1, int *mod1, int *in2, int *mod2, 
 		delete []f;
 		*f1 = NULL;
 		delete []s;
-		*sss = NULL;
+		*sss = NULL; *nPoint = -1;	// S-34
 		delete []ch;
 		fclose( fp );
 		return;
 	};
-	for( i = 0, ii = 0, j = 0, in1_1 = 0, in2_1 = 0; (j = ChooseString1( ch + i, "WavePort", "):Mode(", &nInp, &nMod )) > 0; i += j, ii++ ) 
+	// I-11: the pair not found is an error (old: in1_1 = 0, in2_1 = 0 - the first column silently)
+	for( i = 0, ii = 0, j = 0, in1_1 = -1, in2_1 = -1; (j = ChooseString1( ch + i, "WavePort", "):Mode(", &nInp, &nMod )) > 0; i += j, ii++ )
 	{
 		if( (nInp == *in1)&&(nMod == *mod1) ) in1_1 = ii;
 		if( (nInp == *in2)&&(nMod == *mod2) ) in2_1 = ii;
+	};
+	/// I-11: пары «вход, мода» нет в заголовке CST — ошибка чтения, как у HFSS (раньше — первый столбец).
+	if( ( in1_1 < 0 )||( in2_1 < 0 ) )
+	{
+		delete []f;
+		*f1 = NULL;
+		delete []s;
+		*sss = NULL; *nPoint = -1;
+		delete []ch;
+		fclose( fp );
+		return;
 	};
 	if( fgets( ch, nSize, fp )== NULL )
 	{
 		delete []f;
 		*f1 = NULL;
 		delete []s;
-		*sss = NULL;
+		*sss = NULL; *nPoint = -1;	// S-34
 		delete []ch;
 		fclose( fp );
 		return;
@@ -772,28 +794,30 @@ void SMatrixElementCST_FreqArrayRead( int *in1, int *mod1, int *in2, int *mod2, 
 			delete []f;
 			*f1 = NULL;
 			delete []s;
-			*sss = NULL;
+			*sss = NULL; *nPoint = -1;	// S-34
 			delete []ch;
 			fclose( fp );
 			return;
 		};
 
+		// Z-21 (author 29.10): the CST frequency is taken as is; its units are not known yet.
+		/// З-21 (ответ автора 29.10.2026): частота CST берётся без пересчёта; в каких единицах она
+		/// в файлах CST, автор не знает — уточнить по руководству CST.
 		f[ i ] = r;
 
 		for( j = 0; j < (*nMatrixSize)*(*nMatrixSize); j++ )
 		{
-			fscanf( fp, "%lg%lg", &dBuf, &dBuf1);
+			(void)!fscanf( fp, "%lg%lg", &dBuf, &dBuf1);
 			if( ((in1_1)*(*nMatrixSize)+(in2_1)) == j )
 			{
+				// модуль и фаза в градусах -> Re, Im
 				s[ i ].x = dBuf*cos(dBuf1/180.*3.141592653589);
 				s[ i ].y = dBuf*sin(dBuf1/180.*3.141592653589);
 			};
 		};
-		fgets( ch, nSize, fp );
+		(void)!fgets( ch, nSize, fp );
 	};
 
-//	sprintf( ch, "nMatrixSize = %d; nPoint = %d", i, j );
-//	PutStatistics111( ch );
 
 	delete []ch;
 	fclose( fp );

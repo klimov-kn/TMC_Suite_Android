@@ -1,5 +1,12 @@
+/// @file usersamples.cpp
+/// @brief Реализация «Моих образцов»: папки с заданием и `sample.json` в Документах.
+///
+/// Часть модуля «Ядро TPL Designer», каталог образцов. Описание открытых функций —
+/// в `usersamples.h`.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#samples
 #include "usersamples.h"
 
+#include "lang.h"
 #include "tplreader.h"
 
 #include <QDir>
@@ -16,9 +23,13 @@ namespace tpl::samples {
 
 namespace {
 
+/// Имя файла с названием, описанием, ядром и временем сохранения образца.
 const char *const kMeta = "sample.json";
 
 /// Имя папки из названия: без символов, которых не любит файловая система.
+/// @param[in] title  название образца
+/// @return Название без `\ / : * ? " < > |` (заменены на `_`), не длиннее 60 символов;
+///         пустое -> «образец».
 QString folderName(const QString &title)
 {
     QString s = title.trimmed();
@@ -95,7 +106,7 @@ WriteResult saveUserSample(const QString &title, const QString &summary, const P
     QFile meta(QDir(dir).filePath(QLatin1String(kMeta)));
     if (!meta.open(QIODevice::WriteOnly)) {
         r.ok = false;
-        r.error = QStringLiteral("не удалось записать %1").arg(meta.fileName());
+        r.error = tpl::tr("не удалось записать %1", "failed to write %1").arg(meta.fileName());
         return r;
     }
     meta.write(QJsonDocument(o).toJson());
@@ -112,9 +123,9 @@ Build loadUserSample(const UserSample &s)
     b.project = r.project;
     b.project.kernel = s.kernel == Kernel::X ? Kernel::X : r.project.kernel;
     for (const QString &w : r.warnings)
-        b.notes << QStringLiteral("При чтении: ") + w;
+        b.notes << tpl::tr("При чтении: ", "While reading: ") + w;
     for (const QString &e : r.errors)
-        b.notes << QStringLiteral("Ошибка чтения: ") + e;
+        b.notes << tpl::tr("Ошибка чтения: ", "Read error: ") + e;
 
     // Всё, кроме самого задания и его _step.h, — сопутствующие файлы (распределения .eps).
     const QDir d(s.dir);
@@ -126,13 +137,13 @@ Build loadUserSample(const UserSample &s)
                 b.companions.insert(fi.fileName(), f.readAll());
         }
     }
-    b.theory << Row{QStringLiteral("Папка"), s.dir};
-    b.theory << Row{QStringLiteral("Шагов расчёта"), QString::number(b.project.stepCount())};
-    b.theory << Row{QStringLiteral("Фигур / входов"), QStringLiteral("%1 / %2")
+    b.theory << Row{tpl::tr("Папка", "Folder"), s.dir};
+    b.theory << Row{tpl::tr("Шагов расчёта", "Calculation steps"), QString::number(b.project.stepCount())};
+    b.theory << Row{tpl::tr("Фигур / входов", "Shapes / ports"), QStringLiteral("%1 / %2")
                                                            .arg(b.project.shapes.size())
                                                            .arg(b.project.ports.size())};
     if (s.created.isValid())
-        b.theory << Row{QStringLiteral("Сохранён"), s.created.toString(QStringLiteral("dd.MM.yyyy hh:mm"))};
+        b.theory << Row{tpl::tr("Сохранён", "Saved"), s.created.toString(QStringLiteral("dd.MM.yyyy hh:mm"))};
     return b;
 }
 

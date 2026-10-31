@@ -4,24 +4,29 @@
 //  kernel run. See TmcWideband.h for what and why.
 //
 
-#include "StdAfx.h"
+/// @file tmcwideband.cpp
+/// @brief Реализация `CTmcWideband`: многочастотная обработка `.t` — частоты сигнала, спектры падающей и уходящих волн, поправка на рассогласование порта, запись `.s`.
+///
+/// Часть модуля «Вьювер TMCROS»; тот же файл собирается в библиотеки ядер
+/// `planarrt_h_ttos`, `planarrt_x_ttos`. Объявление — в общем `src/Include/tmcwideband.h`.
+/// @see https://www.tamic.ru/docs/code/tmcros.html#wideband
 #include <math.h>
 #include <float.h>
-#include <Tmcgrviw.h>
-#include <Proc_s.h>
-#include <S_file.h>
-#include <TmcWideband.h>
+#include <tmcgrviw.h>
+#include <proc_s.h>
+#include <s_file.h>
+#include <tmcwideband.h>
 
-#ifdef _DEBUG
-#define new DEBUG_NEW
-#undef THIS_FILE
-static char THIS_FILE[] = __FILE__;
-#endif
 
+/// Размер буфера строки файла `.t` и текста сообщений, символов.
 #define TMC_WB_BUF			1024
+/// Число pi.
 #define TMC_WB_PI			3.14159265358979323846
+/// Скорость света в вакууме, м/с.
 #define TMC_WB_C0			299792458.0
+/// Число точек сетки частот при поиске частот по спектру падающей волны.
 #define TMC_WB_SCANPOINTS	2048		// grid for looking where the energy is
+/// Порог поиска частот: учитываются уровни не ниже наибольшего минус столько дБ.
 #define TMC_WB_PEAKDB		20.0		// keep lines down to this many dB from the top
 
 /////////////////////////////////////////////////////////////////////////////
@@ -47,11 +52,13 @@ void CTmcWideband::DeleteData()
 	csSFileName.Format("");
 	csError.Format("No error");
 	bIsError = FALSE;
+	csWarning.Format("");	// B-22
 	bWideband = FALSE;
 	bContinuous = FALSE;
 	nPoint = 0;
 	nInput = 0;
 	nFreq = 0;
+	nFreqNamed = 0;		// A-4: bez #FREQ v .sig chastoty ishchutsya po spektru
 	nPort = 0;
 	dFitT1 = 0.0;
 	dTmin = 0.0;
@@ -67,6 +74,84 @@ BOOL CTmcWideband::IsError()
 CString & CTmcWideband::GetErrorMessage()
 {
 	return csError;
+}
+
+CString & CTmcWideband::GetWarningMessage()	// B-22
+{
+	return csWarning;
+}
+
+//  B-22 (answer of the author 26.10.2026): the window Tmin...Tmax (SMATRIX of the kernel or the TtoS dialog) is
+//  used; the full window is 0...Tmax of the task. Old: all the points of the .t, the window was not used.
+//  For a pulse: a response not died away by the end of the window, or a window that cuts the incident
+//  pulse at its start, is a warning - the spectrum is distorted then.
+void CTmcWideband::ApplyWindow()
+{
+	int i, j, n;
+	BOOL bCutStart = FALSE;
+	char szE[TMC_WB_BUF];
+
+	if( IsError() ) return;
+
+	if( dTmax > dTmin )
+	{
+		// Окно отрезает начало записи — для импульса это повод проверить начало окна.
+		bCutStart = ( pdTime[0] < dTmin );
+		for( i = 0, n = 0; i < nPoint; i++ )
+		{
+			if( ( pdTime[i] < dTmin )||( pdTime[i] > dTmax ) ) continue;
+			pdTime[n] = pdTime[i];
+			for( j = 0; j < nInput; j++ )
+			{
+				pdUp[n*nInput + j] = pdUp[i*nInput + j];
+				pdUo[n*nInput + j] = pdUo[i*nInput + j];
+			};
+			n++;
+		};
+		if( n < 8 )
+		{
+			sprintf( szE, "Wideband: only %d points of the .t in the window Tmin=%lg; Tmax=%lg s", n, dTmin, dTmax );
+			PutErrorMessage( szE );
+			return;
+		};
+		nPoint = n;
+	};
+	/// I-26: импульс или многотон — по точкам окна, которые и разлагаются (раньше — по всей записи).
+	DetectSignalKind();	// I-26
+
+	if( bContinuous ) return;	// a multi-tone does not die away by its nature
+
+	{
+		double dPeak = 0.0, dHead = 0.0, dTail = 0.0, dR;
+		// Края окна — по 5% отсчётов; уровень — больший из |Up| и |Uo| всех портов.
+		int nEdge = nPoint/20;
+		if( nEdge < 1 ) nEdge = 1;
+		for( i = 0; i < nPoint; i++ )
+		{
+			for( j = 0; j < nInput; j++ )
+			{
+				dR = fabs( pdUp[i*nInput + j] );
+				if( fabs( pdUo[i*nInput + j] ) > dR ) dR = fabs( pdUo[i*nInput + j] );
+				if( dR > dPeak ) dPeak = dR;
+				if( ( i >= nPoint - nEdge )&&( dR > dTail ) ) dTail = dR;
+				if( ( i < nEdge )&&( dR > dHead ) ) dHead = dR;
+			};
+		};
+		if( ( dPeak > 0.0 )&&( dTail > 0.01*dPeak ) )
+		{
+			sprintf( szE, "Wideband: the response has not died away by the end of the window (t = %lg s): %.1f%% of its peak - "
+				"the spectrum is distorted; make TIME (or Tmax of SMATRIX) longer", pdTime[nPoint-1], 100.0*dTail/dPeak );
+			csWarning = szE;
+		};
+		if( bCutStart&&( dPeak > 0.0 )&&( dHead > 0.01*dPeak ) )
+		{
+			sprintf( szE, "Wideband: the window starts while the pulse is running (t = %lg s): %.1f%% of its peak - "
+				"the spectrum is distorted; make Tmin of SMATRIX smaller", pdTime[0], 100.0*dHead/dPeak );
+			if( csWarning.GetLength() > 0 ) csWarning += " ";
+			csWarning += szE;
+		};
+	};
+	return;
 }
 
 void CTmcWideband::PutErrorMessage(const char *ch)
@@ -286,6 +371,7 @@ void CTmcWideband::DetectSignalKind()
 		{
 			dR = fabs( pdUp[i*nInput + j] );
 			if( dR > dMax ) dMax = dR;
+			// Хвост — последняя четверть записи.
 			if( i > ( nPoint*3 )/4 )
 			{
 				if( dR > dTail ) dTail = dR;
@@ -345,6 +431,9 @@ BOOL CTmcWideband::SolveLinear( double *pdA, double *pdB, int n )
 {
 	int i, j, k, nBest;
 	double dBest, dR;
+	double dScale = 0.0;	// S-32: the scale of the matrix for a relative test of degeneracy
+
+	for( k = 0; k < n; k++ ) if( fabs( pdA[k*n + k] ) > dScale ) dScale = fabs( pdA[k*n + k] );
 
 	for( k = 0; k < n; k++ )
 	{
@@ -359,6 +448,7 @@ BOOL CTmcWideband::SolveLinear( double *pdA, double *pdB, int n )
 			};
 		};
 		if( dBest < 1e-300 ) return FALSE;
+		if( dBest < 1e-6*dScale ) return FALSE;	// S-32: nearly singular (tones closer than 1/T or repeated)
 		if( nBest != k )
 		{
 			for( j = 0; j < n; j++ )
@@ -472,6 +562,7 @@ void CTmcWideband::FindFrequencies()
 				double dSp = ( dFreq[nFreq-1] - dFreq[0] )/( nFreq - 1 );
 				if( dSp > 0.0 )
 				{
+					// Длина окна — целое число периодов шага частот dSp (не длиннее всей записи).
 					double dW = floor( ( dT2n - dT1n )*dSp + 0.5 )/dSp;
 					if( ( dW > 0.0 )&&( dW <= ( dT2n - pdTime[0] ) ) ) dT1n = dT2n - dW;
 				};
@@ -501,6 +592,7 @@ void CTmcWideband::FindFrequencies()
 		PutErrorMessage("Wideband: bad time column in the signal file");
 		return;
 	};
+	// Сетка поиска: до min(Fs/4, 3*частота согласования первого порта), TMC_WB_SCANPOINTS точек.
 	dFs = ( nPoint - 1 )/( pdTime[nPoint-1] - pdTime[0] );	// sampling rate
 	dFmax = 0.25*dFs;										// well below Nyquist
 	//  Scanning the whole band up to Nyquist would make the grid far too
@@ -539,6 +631,7 @@ void CTmcWideband::FindFrequencies()
 	for( k = 0; k < TMC_WB_SCANPOINTS; k++ )
 	{
 		double dF = ( k + 1 )*dStep;
+		// Многотон — проекция на установившейся второй половине записи, импульс — интеграл по всей записи.
 		if( bContinuous ) Project( pdCol, dF, dT1, dT2, &dRe, &dIm );
 		else Integrate( pdCol, dF, &dRe, &dIm );
 		pdLev[k] = sqrt( dRe*dRe + dIm*dIm );
@@ -553,6 +646,8 @@ void CTmcWideband::FindFrequencies()
 		//  Two lines closer than 1/T are not distinguishable at all, so a
 		//  bump narrower than that is ripple, not a tone. Look for a maximum
 		//  over a window of that width instead of comparing to neighbours.
+		// Пик — точка, не меньшая всех точек в пределах +-nWin (ширина 1/T), выше порога -20 дБ
+		// и не меньше соседей; положение уточняется параболой по трём точкам.
 		int nWin = ( int )( 1.0/( ( dT2 - dT1 )*dStep ) + 0.5 );
 		if( nWin < 3 ) nWin = 3;
 		for( k = 1; ( k < TMC_WB_SCANPOINTS - 1 )&&( nFreq < TMC_WIDEBAND_MAXFREQ ) ; k++ )
@@ -596,6 +691,7 @@ void CTmcWideband::FindFrequencies()
 			nFreq = 0;
 			if( ( kLo >= 0 )&&( kHi > kLo ) )
 			{
+				// Полоса kLo..kHi выше порога — 21 частота равномерно.
 				int nWant = 21;
 				for( k = 0; k < nWant; k++ )
 				{
@@ -682,6 +778,13 @@ void CTmcWideband::FindFrequencies()
 //  Port mismatch. The kernel sets the port admittance once, from FREQ, so
 //  at every other frequency the port itself reflects. The same formula as
 //  in CTmcRTHNodeDiel::SetInputAdmitance.
+//  Б-22 (1), ответ автора 29.10.2026 — ОГРАНИЧЕНИЯ поправки (оставлены как есть, это свойство
+//  многочастотного режима): (1) Y(f) порта — по ширине апертуры без W порта и без магнитных стенок,
+//  которые учитывает нагрузка порта в ядре; (2) FixMismatch ставит Gamma возбуждённого порта на оба
+//  порта (чётная/нечётная волны) — точно только для одинаковых портов и симметричного устройства
+//  (S11 = S22); у портов разной ширины или несимметричной структуры поправка приближённая. Предупреждение
+//  о таких заданиях — в TPL Designer. В будущем — многоканальный вход (частотный мультиплексор со своей
+//  согласованной Y на каждую частоту) и многоканальное возбуждение; тогда эта поправка не нужна.
 double CTmcWideband::PortGamma( double dF, int nPort1 )
 {
 	double dA, dY1, dY0, dDelta, dAper, dF0;
@@ -692,8 +795,20 @@ double CTmcWideband::PortGamma( double dF, int nPort1 )
 	dF0 = dPortFreq[nPort1];
 	if( ( dDelta <= 0.0 )||( dAper <= 0.0 )||( dF0 <= 0.0 ) ) return 0.0;
 
+	// Проводимость нагрузки порта Y(f) = sin(acos(2*cos(a) - cos(pi*Delta/b)))/sin(a), a = sqrt(2)*pi*Delta*f/c;
+	// Y(f0) — на частоте согласования. Gamma = (Y(f) - Y(f0))/(Y(f) + Y(f0)).
 	dA = sqrt( 2.0 )*TMC_WB_PI*dDelta*dF/TMC_WB_C0;
 	if( fabs( sin( dA ) ) < 1e-30 ) return 0.0;
+	{
+		double dArg = 2.0*cos( dA ) - cos( TMC_WB_PI*dDelta/dAper );
+		if( !( ( dArg >= -1.0 )&&( dArg <= 1.0 ) ) )	// S-29: below the cutoff of the port - no wave, NaN
+		{
+			char szE[256];
+			sprintf( szE, "Wideband: frequency %lg Hz is below the cutoff of port %d (aperture %lg m)", dF, nPort1 + 1, dAper );
+			PutErrorMessage( szE );
+			return 0.0;
+		};
+	};
 	dY1 = sin( acos( 2.0*cos( dA ) - cos( TMC_WB_PI*dDelta/dAper ) ) )/sin( dA );
 
 	dA = sqrt( 2.0 )*TMC_WB_PI*dDelta*dF0/TMC_WB_C0;
@@ -722,6 +837,13 @@ double CTmcWideband::PortGamma( double dF, int nPort1 )
 //  excitations, and the correction then applies to the assembled matrix.
 //  With a single column the symmetric case is what can be done honestly;
 //  for anything else only the reflection of the excited port is fixed.
+/// @brief Дробно-линейное преобразование коэффициента отражения: `(m + G)/(1 + G*m)` для комплексного `m` и действительного `G`.
+/// @param[in]  dRe     действительная часть `m`
+/// @param[in]  dIm     мнимая часть `m`
+/// @param[in]  dG      действительный коэффициент отражения порта `Gamma`
+/// @param[out] pdOutRe действительная часть результата
+/// @param[out] pdOutIm мнимая часть результата; при знаменателе ~0 результат равен `m`
+/// @see https://www.tamic.ru/docs/code/tmcros.html#mismatch
 static void TmcWbBilinear( double dRe, double dIm, double dG,
 	double *pdOutRe, double *pdOutIm )
 {
@@ -758,6 +880,7 @@ void CTmcWideband::FixMismatch( _complex *pcCol, int nExcited, double dF )
 		double dStR = pcCol[nOther].x, dStI = pcCol[nOther].y;
 		double dGeR, dGeI, dGoR, dGoI;
 
+		// Чётная (S11 + S21) и нечётная (S11 - S21) волны симметричного двухполюсника; Gamma — возбуждённого порта.
 		TmcWbBilinear( dSrR + dStR, dSrI + dStI, dG, &dGeR, &dGeI );
 		TmcWbBilinear( dSrR - dStR, dSrI - dStI, dG, &dGoR, &dGoI );
 
@@ -828,6 +951,12 @@ void CTmcWideband::MakeAndSave()
 	};
 
 	//  one frequency at a time: build the column and append it to the .s
+	// Наибольший |Up(f)|^2 — опора для порога «на частоте нет падающей волны» (1e-12 по квадрату).
+	double dIncMax = 0.0;	// S-31: the strongest tone of the incident wave
+	int nFreqErr = 0;		// D-1: frequencies with an error (zeros in the .s)
+	CString csFreqErr, csFirstErr;
+	for( k = 0; k < nFreq; k++ )
+		if( pcInc[k].x*pcInc[k].x + pcInc[k].y*pcInc[k].y > dIncMax ) dIncMax = pcInc[k].x*pcInc[k].x + pcInc[k].y*pcInc[k].y;
 	for( k = 0; k < nFreq; k++ )
 	{
 		for( i = 0; i < nInput; i++ ) { pcCol[i].x = 0.0; pcCol[i].y = 0.0; };
@@ -839,7 +968,11 @@ void CTmcWideband::MakeAndSave()
 			for( j = 0; j < nPoint; j++ ) pdCol[j] = pdUo[j*nInput + i];
 			if( bContinuous )
 			{
-				if( !FitTones( pdCol, dT1, dT2, pcRef ) ) continue;
+				if( !FitTones( pdCol, dT1, dT2, pcRef ) )	// S-31: not S = 0 silently
+				{
+					PutErrorMessage("Wideband: can not resolve the tones of the reflected wave");
+					break;
+				};
 				dRe = pcRef[k].x;
 				dIm = pcRef[k].y;
 			}
@@ -849,12 +982,36 @@ void CTmcWideband::MakeAndSave()
 			};
 			//  divide by the incident wave
 			dDen = pcInc[k].x*pcInc[k].x + pcInc[k].y*pcInc[k].y;
-			if( dDen < 1e-300 ) continue;
+			if( ( dDen < 1e-300 )||( dDen < 1e-12*dIncMax ) )	// S-31: no incident wave at this frequency - not S = 0 silently
+			{
+				char szE[256];
+				sprintf( szE, "Wideband: the incident wave has no energy at %lg Hz", dFreq[k] );
+				PutErrorMessage( szE );
+				break;
+			};
+			// S(i, n) = Uo_i(f)/Up_n(f) — комплексное деление.
 			pcCol[i].x = ( _real )( ( dRe*pcInc[k].x + dIm*pcInc[k].y )/dDen );
 			pcCol[i].y = ( _real )( ( dIm*pcInc[k].x - dRe*pcInc[k].y )/dDen );
 		};
 
-FixMismatch( pcCol, nExc, dFreq[k] );
+		// D-1: a frequency with an error is zeros in the column, the next frequencies are calculated.
+		// Old: if( IsError() ) break; FixMismatch(...); if( IsError() ) break; - the rest of the sweep was lost.
+		if( !IsError() ) FixMismatch( pcCol, nExc, dFreq[k] );	// S-29: below the cutoff of the port - an error
+		if( IsError() )
+		{
+			// Частота с ошибкой: нули в столбце, ошибка сбрасывается, следующие частоты считаются.
+			if( nFreqErr == 0 ) csFirstErr = csError;
+			if( nFreqErr < 10 )
+			{
+				CString csF;
+				csF.Format( "%s%lg", ( nFreqErr > 0 ) ? ", " : "", dFreq[k] );
+				csFreqErr += csF;
+			};
+			nFreqErr++;
+			bIsError = FALSE;
+			csError.Format("No error");
+			for( i = 0; i < nInput; i++ ) { pcCol[i].x = 0.0; pcCol[i].y = 0.0; };
+		};
 
 		strcpy( szBuf, ( const char * )csSFileName );
 		if( save_S_matrix_element( nExc + 1, szBuf, pcCol, dFreq[k], nInput ) != 0 )
@@ -862,6 +1019,15 @@ FixMismatch( pcCol, nExc, dFreq[k] );
 			PutErrorMessage("Wideband: can not write the S-matrix file");
 			break;
 		};
+	};
+	if( ( nFreqErr > 0 )&&( !IsError() ) )	// D-1
+	{
+		CString csE;
+		csE.Format( "Wideband: error at %d of %d frequencies (%s%s Hz) - the S-matrix is zeros there. %s",
+			nFreqErr, nFreq, (LPCSTR)csFreqErr, ( nFreqErr > 10 ) ? ", ..." : "", (LPCSTR)csFirstErr );
+		strncpy( szBuf, (LPCSTR)csE, TMC_WB_BUF - 1 );
+		szBuf[TMC_WB_BUF - 1] = '\0';
+		PutErrorMessage( szBuf );
 	};
 
 	delete []pcCol;
@@ -883,7 +1049,9 @@ void CTmcWideband::Process( CString csTFile, CString csSFile,
 
 	ReadHeader();
 	ReadSignals();
-	DetectSignalKind();
+	// I-26: the kind of the signal is detected inside ApplyWindow, by the points of the window
+	// (old: DetectSignalKind(); here - by the whole record before the window)
+	ApplyWindow();		// B-22
 	FindFrequencies();
 	MakeAndSave();
 	return;

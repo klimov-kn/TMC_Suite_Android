@@ -1,4 +1,10 @@
+/// @file ramestimate.cpp
+/// @brief Реализация оценки памяти ядра (`ramEstimate`) и форматирования размеров.
+///
+/// Описание — в ramestimate.h.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#ram
 #include "ramestimate.h"
+#include "lang.h"
 
 #include "sigfile.h"
 
@@ -10,10 +16,13 @@ namespace tpl {
 namespace {
 
 // Замер 30.09.2026 на сервере (TMC_Suite/GPU_PLAN.md): байт на узел с блоками.
+/// Память H-ядра на узел сетки с блоками, байт.
 constexpr double kBytesPerNodeH = 52.0;
+/// Память X-ядра на узел сетки с блоками, байт.
 constexpr double kBytesPerNodeX = 127.0;
 
 // `_real` в счётных ядрах — double (Typerth.h).
+/// Размер вещественного числа ядра (`_real` = double), байт.
 constexpr double kReal = 8.0;
 
 } // namespace
@@ -71,12 +80,13 @@ QString formatBytes(double bytes)
 {
     const double k = 1024.0;
     if (bytes >= k * k * k)
-        return QStringLiteral("%1 ГБ").arg(bytes / (k * k * k), 0, 'f', bytes >= 10 * k * k * k ? 0 : 1);
+        return tpl::tr("%1 ГБ",
+                       "%1 GB").arg(bytes / (k * k * k), 0, 'f', bytes >= 10 * k * k * k ? 0 : 1);
     if (bytes >= k * k)
-        return QStringLiteral("%1 МБ").arg(bytes / (k * k), 0, 'f', 0);
+        return tpl::tr("%1 МБ", "%1 MB").arg(bytes / (k * k), 0, 'f', 0);
     if (bytes >= k)
-        return QStringLiteral("%1 КБ").arg(bytes / k, 0, 'f', 0);
-    return QStringLiteral("%1 Б").arg(bytes, 0, 'f', 0);
+        return tpl::tr("%1 КБ", "%1 KB").arg(bytes / k, 0, 'f', 0);
+    return tpl::tr("%1 Б", "%1 B").arg(bytes, 0, 'f', 0);
 }
 
 } // namespace tpl

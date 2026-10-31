@@ -8,6 +8,8 @@
 // поэтому переживает поворот телефона.
 #pragma once
 
+#include "touchgesture.h"
+
 #include <QElapsedTimer>
 #include <QPointer>
 #include <QQuickRhiItem>
@@ -81,6 +83,8 @@ public:
     Q_INVOKABLE void panBy(double dx, double dy);
     /// Масштаб щипком относительно текущего.
     Q_INVOKABLE void zoomBy(double factor);
+    /// Масштаб вокруг точки экрана (x, y), пиксели: точка под пальцами остаётся на месте.
+    Q_INVOKABLE void zoomAt(double factor, double x, double y);
 
     /// Матрица вида и проекции без поправки под API (для подписей поверх сцены).
     QMatrix4x4 viewProjection(double aspect) const;
@@ -97,10 +101,13 @@ Q_SIGNALS:
     void backendNameChanged();
 
 protected:
+    void touchEvent(QTouchEvent *e) override;
+    void touchUngrabEvent() override;
     QQuickRhiItemRenderer *createRenderer() override;
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
 
 private:
+    TouchGesture m_touch;   // один палец — поворот, щипок — масштаб и сдвиг
     friend class FieldRenderer;
     void updatePortLabels();
 

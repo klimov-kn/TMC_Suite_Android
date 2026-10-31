@@ -1,4 +1,12 @@
+/// @file catalog.cpp
+/// @brief Каталог образцов: фабрики `Param`, таблицы разделов и образцов, поиск и `make()`.
+///
+/// Часть модуля «Ядро TPL Designer», каталог образцов. Таблицы строятся функциями и
+/// хранятся по одной на язык интерфейса. Описание открытых функций — в `sample.h`.
+/// @see https://www.tamic.ru/docs/code/tpl-designer.html#samples
 #include "sample.h"
+
+#include "lang.h"
 
 #include <cmath>
 
@@ -65,35 +73,66 @@ Param Param::flag(const QString &key, const QString &label, bool def, const QStr
     return p;
 }
 
+namespace {
+
+// Тексты каталога зависят от языка (lang.h), поэтому таблица строится функцией, а
+// хранится своя на каждый язык: переключение языка не «замораживает» прежние надписи,
+// а указатели, выданные find()/inSection(), остаются живыми.
+/// @brief Строит список разделов каталога на текущем языке.
+/// @return Пять разделов: волноводы, антенны, микрополоска, среды, учебные задания.
+QVector<Section> makeSections()
+{
+    return {
+        {QStringLiteral("waveguide"), tpl::tr("Волноводы и узлы", "Waveguides and components"),
+         tpl::tr("Стандартные сечения, неоднородности, фильтры",
+                 "Standard cross-sections, discontinuities, filters")},
+        {QStringLiteral("antenna"), tpl::tr("Антенны", "Antennas"),
+         tpl::tr("Излучатели, рупоры, линзы, отражатели, решётки",
+                 "Radiators, horns, lenses, reflectors, arrays")},
+        {QStringLiteral("microstrip"), tpl::tr("Микрополосковые", "Microstrip"),
+         tpl::tr("Планарная модель: линии, шлейфы, фильтры, ответвители",
+                 "Planar model: lines, stubs, filters, couplers")},
+        {QStringLiteral("media"), tpl::tr("Среды, плазма, ЭПР", "Media, plasma, RCS"),
+         tpl::tr("Неоднородная eps, плазма, рассеяние на телах",
+                 "Inhomogeneous eps, plasma, scattering by bodies")},
+        {QStringLiteral("lesson"), tpl::tr("Учебные задания", "Training tasks"),
+         tpl::tr("Авторские задания лабораторных работ", "Author's laboratory work tasks")},
+    };
+}
+
+/// @brief Строит таблицу всех образцов на текущем языке, вызывая регистрацию разделов.
+/// @return Образцы в порядке разделов: волноводы, антенны, микрополоска, среды, уроки.
+QVector<Sample> makeAll()
+{
+    QVector<Sample> v;
+    addWaveguides(&v);
+    addAntennas(&v);
+    addMicrostrip(&v);
+    addMedia(&v);
+    addLessons(&v);
+    return v;
+}
+
+} // namespace
+
 const QVector<Section> &sections()
 {
-    static const QVector<Section> list = {
-        {QStringLiteral("waveguide"), QStringLiteral("Волноводы и узлы"),
-         QStringLiteral("Стандартные сечения, неоднородности, фильтры")},
-        {QStringLiteral("antenna"), QStringLiteral("Антенны"),
-         QStringLiteral("Излучатели, рупоры, линзы, отражатели, решётки")},
-        {QStringLiteral("microstrip"), QStringLiteral("Микрополосковые"),
-         QStringLiteral("Планарная модель: линии, шлейфы, фильтры, ответвители")},
-        {QStringLiteral("media"), QStringLiteral("Среды, плазма, ЭПР"),
-         QStringLiteral("Неоднородная eps, плазма, рассеяние на телах")},
-        {QStringLiteral("lesson"), QStringLiteral("Учебные задания"),
-         QStringLiteral("Авторские задания лабораторных работ")},
-    };
-    return list;
+    if (tpl::english()) {
+        static const QVector<Section> en = makeSections();
+        return en;
+    }
+    static const QVector<Section> ru = makeSections();
+    return ru;
 }
 
 const QVector<Sample> &all()
 {
-    static const QVector<Sample> list = [] {
-        QVector<Sample> v;
-        addWaveguides(&v);
-        addAntennas(&v);
-        addMicrostrip(&v);
-        addMedia(&v);
-        addLessons(&v);
-        return v;
-    }();
-    return list;
+    if (tpl::english()) {
+        static const QVector<Sample> en = makeAll();
+        return en;
+    }
+    static const QVector<Sample> ru = makeAll();
+    return ru;
 }
 
 const Sample *find(const QString &id)

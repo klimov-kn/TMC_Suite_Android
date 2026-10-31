@@ -19,20 +19,31 @@
 **
 */
 
+/// @file inte_in1.cpp
+/// @brief Разбор программы интерпретатора: последовательности `;`, блоки `{...}`, точка входа `inte_atof`.
+///
+/// Часть библиотеки `exprint` (Inter). Подстрока сначала пробуется как выражение Expr;
+/// если вычислитель не распознал её (`ERROR_FUNCTION`), — как оператор (`inte_oper`).
+/// @see https://www.tamic.ru/docs/code/lib-inter.html#grammar
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
 
-#include <Typedef.h>
-#include <TMC_LIB.H>
-#include <INTER.H>
+#include <typedef.h>
+#include <tmc_lib.h>
+#include <inter.h>
 
+/// Разделитель операторов.
 #define INTER_BLANCK ';'
+/// Открывающая скобка блока.
 #define INTER_BRACKET1 '{'
+/// Закрывающая скобка блока.
 #define INTER_BRACKET2 '}'
+/// Открывающая круглая скобка (учитывается при поиске `;` вне скобок).
 #define INTER_BRACKET11 '('
+/// Закрывающая круглая скобка.
 #define INTER_BRACKET12 ')'
 
 int expr_del_Blanks1( char *ch )
@@ -47,6 +58,8 @@ int expr_del_Blanks1( char *ch )
 			case '\t':	
 				break;
 			case '\n':
+				break;
+			case '\r':	// I-05: the end of line of Windows is a blank too (old: not removed - parse error)
 				break;
 			default:
 				ch[i1] = ch[i];
@@ -64,7 +77,6 @@ int  i1nte_atof_1( char *string, double *r )
 {
 	expr_del_Blanks1( string  );
 	*r  =  (double)(inte_atof( string ));
-//	printf("\n{%s};r = %lg;\nError = %d", string, *r, expr_get_error_cod());
 	return expr_get_error_cod();
 
 }
@@ -72,7 +84,6 @@ int  i1nte_atof_1( char *string, double *r )
 _real  inte_atof( char  *string )
  {
 	_real d;
- // del_blanks( string );
   expr_set_error_cod( 0 );
 
   d = inte_inter( string, strlen( string ));
@@ -94,18 +105,19 @@ _real  inte_inter( char   *lex, int n )
 //  int i1;
   double d;
 
-//  printf("\n1lex={%s}, n={%d}", lex, n);
-//  getch();
   if( expr_get_error_cod() != 0  ) return 0;
   if( ( n == 1 )&&( lex[0] == INTER_BLANCK ) ) return 0;
   if( n == 0 ) return 0;
 
+  // Блок {...} целиком: выполнить содержимое
   if( ( lex[0] == INTER_BRACKET1) && ( lex[n-1] == INTER_BRACKET2) )   /*for expression in bracket*/
    {
     return( inte_inter( lex+1, n-2) );
     };
 
   j = 0;
+  // Первая «;» вне скобок делит строку: левая часть выполняется, затем правая;
+  // результат — значение правой части (или левой, если «;» последняя)
     for( i = 0, j = 0, j1 = 0; i < n; i++)                /* select blanck  */
      {                                               
       switch( lex[i] )                                  
@@ -130,6 +142,7 @@ _real  inte_inter( char   *lex, int n )
        };
 
   			                            				/*is string arif expression?*/
+  // Сначала — как арифметическое выражение; не распознано — как оператор
   d = expr_inter( lex, n );                             
   if( expr_get_error_cod() == 0 ) return d;             /*is string bad arif expression?*/
   if( expr_get_error_cod() != ERROR_FUNCTION ) return (_real)0;

@@ -11,16 +11,26 @@
 **
 */
 
+/// @file frqdata.cpp
+/// @brief Глобальная таблица частот библиотеки sfile95 и функции доступа к ней.
+///
+/// Часть модуля «Библиотека sfile95». Одна статическая таблица на процесс:
+/// не больше `FREQ_MAX_NUM` точек, частоты хранятся в Гц, текущие единицы по
+/// умолчанию — ГГц. Функции объявлены и описаны в `frqdata.h`.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#frequency-table
+
 #include <stdio.h>
 
-#include <Typedef.h>
-#include <TMCLIMIT.H>
-#include <FRQDATA.H>
-#include <Error1.h>
+#include <typedef.h>
+#include <tmclimit.h>
+#include <frqdata.h>
+#include <error1.h>
 
 
+/// Хранилище частот глобальной таблицы, Гц; длина `FREQ_MAX_NUM`.
 static _real frq_buff[FREQ_MAX_NUM];  /*buffer for frequency */
 
+/// Глобальная таблица частот: пуста, текущие единицы — ГГц (код 3).
 static FREQUENCY frq = { 0,                    /* current frequency point  */
                          0,                    /* maximal frequency point  */
                          frq_buff,             /* frequency point array    */
@@ -39,6 +49,7 @@ int set_frequency( _real f0, _real df, int nf )
   int num;
 
   frq.max = nf;
+  // перевод из текущих единиц в Гц
   f0 *= frq.unit[frq.code];
   df *= frq.unit[frq.code];
 
@@ -49,33 +60,9 @@ int set_frequency( _real f0, _real df, int nf )
  }
 
 
-int set_frequency_arr( _real *ftmp, int nf )
- {
-  int  num;
-
-  frq.max = nf;
-
-  for( num = 0; num < frq.max; num++ )
-   frq.f[num] = ftmp[num]*frq.unit[frq.code];
-
-  return 0;
-  }
 
 
-_real get_frq_f0( int unit_flag )  /* if unit_flag == 1  then return frequency in current units */
- {
-  _real f0 = frq.f[0];
 
-   return( (unit_flag != 1)? f0:(f0/frq.unit[frq.code]) );
-  }
-
-_real get_frq_df( int unit_flag )  /* if unit_flag == 1  then return frequency in current units */
- {
-  _real df;
-
-  df = ( frq.max == 1 )? (_real)0.0: frq.f[1] - frq.f[0];
-  return( ( unit_flag == 1 )? (df /= frq.unit[frq.code]):df );
-  }
 
 int   get_frq_nf( void ) { return( frq.max ); }
 int   set_frq_nf( int nMax )
@@ -90,16 +77,10 @@ int   set_frq_nf( int nMax )
   }
 
 const char  * get_frq_item( int num ) { return( frq.item[num] ); }
-const char  * get_current_frq_item( void ) { return( frq.item[frq.code] ); }
 _real get_frq_unit( int num ) { return frq.unit[num]; }
-void  set_frq_item_num( int num ) { frq.code = num; }
 int   get_frq_item_code( void ) { return frq.code; }
-_real get_frq_element( int index ) { return frq.f[index]; }
 void  set_frq_element( _real fValue, int index ) { frq.f[index] = fValue; }
-void  set_frq_element_unit( _real fValue, int index ) { frq.f[index] = fValue*frq.unit[frq.code]; }
-_real get_current_frq( void ) { return frq.f[frq.num]; }
 double get_current_dbl_frq( void ) { return( (double)frq.f[frq.num] ); } /* dummy for writing */
 int   get_current_frq_num( void ) { return frq.num; }
 void  set_current_frq_num( int num ) { frq.num = num; }
-FREQUENCY * GetPointerToFrq( void ) { return &frq; }
 

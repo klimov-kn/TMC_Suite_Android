@@ -71,13 +71,13 @@ Item {
             visible: scene.loaded
         }
 
-        // --- жесты ---
+        // --- мышь на ПК ---
+        // Касания разбирает сам FieldRhiItem (src/ui/touchgesture.h).
         DragHandler {
             id: rotateDrag
             target: null
+            acceptedDevices: PointerDevice.Mouse
             acceptedButtons: Qt.LeftButton
-            minimumPointCount: 1
-            maximumPointCount: 1
             property vector2d last: Qt.vector2d(0, 0)
             onActiveChanged: last = Qt.vector2d(0, 0)
             onActiveTranslationChanged: {
@@ -88,6 +88,7 @@ Item {
         DragHandler {
             // Сдвиг правой кнопкой мыши (компьютер).
             target: null
+            acceptedDevices: PointerDevice.Mouse
             acceptedButtons: Qt.RightButton
             property vector2d last: Qt.vector2d(0, 0)
             onActiveChanged: last = Qt.vector2d(0, 0)
@@ -96,32 +97,12 @@ Item {
                 last = activeTranslation
             }
         }
-        PinchHandler {
-            // Щипок — масштаб, движение двух пальцев — сдвиг.
-            target: null
-            property real lastScale: 1
-            property point lastCentroid
-            onActiveChanged: {
-                lastScale = 1
-                lastCentroid = centroid.position
-            }
-            onActiveScaleChanged: {
-                if (active && lastScale > 0)
-                    field.zoomBy(activeScale / lastScale)
-                lastScale = activeScale
-            }
-            onCentroidChanged: {
-                if (!active)
-                    return
-                field.panBy(centroid.position.x - lastCentroid.x, centroid.position.y - lastCentroid.y)
-                lastCentroid = centroid.position
-            }
-        }
         WheelHandler {
             target: null
             onWheel: (event) => field.zoomBy(Math.pow(1.0015, event.angleDelta.y))
         }
         TapHandler {
+            acceptedDevices: PointerDevice.Mouse
             onDoubleTapped: field.resetView()
         }
 

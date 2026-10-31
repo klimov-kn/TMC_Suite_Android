@@ -19,17 +19,21 @@
 **
 */
 
+/// @file inte_val.cpp
+/// @brief Хранение значения оператора `return`: `inte_set_inter_value`, `inte_get_inter_value`.
+/// @see https://www.tamic.ru/docs/code/lib-inter.html#operators
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
 
-#include <Typedef.h>
-#include <TMC_LIB.H>
-#include <INTER.H>
+#include <typedef.h>
+#include <tmc_lib.h>
+#include <inter.h>
 
 
+/// Общее значение последнего `return(...)` (используется без контекста потока).
 static _real inter_value = 0;
 void  inte_set_inter_value( _real r )
 {

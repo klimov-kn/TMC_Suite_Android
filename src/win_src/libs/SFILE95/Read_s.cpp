@@ -48,39 +48,50 @@
  *  OVERLAY: YES
 */
 
+/// @file read_s.cpp
+/// @brief Чтение всех частот S-файла в память (`read_S_matrix`) и освобождение результатов.
+///
+/// Часть модуля «Библиотека sfile95». Публичные функции объявлены и описаны в
+/// `s_file.h`; здесь — разбор заголовка, строки сетки и «паскалевых» строк.
+/// Читаемые из файла длины и счётчики проверяются на допустимые значения.
+/// @see https://www.tamic.ru/docs/code/lib-sfile95.html#read
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
 #define _HIGH_ACCURACY
 
-#include <Typedef.h>
-#include <TMCLIMIT.H>
-#include <TMCGRAPH.H>
-#include <TMC_LIB.H>
-#include <INDANDEC.H>
-#include <FRQDATA.H>
-#include <S_file.h>
-#include <MAINWNDW.H>
-#include <Proc_s.h>
+#include <typedef.h>
+#include <tmclimit.h>
+#include <tmcgraph.h>
+#include <tmc_lib.h>
+#include <frqdata.h>
+#include <s_file.h>
+#include <mainwndw.h>
+#include <proc_s.h>
 
 
-//#ifndef _TMC_EXT
 
-#include <Error1.h>
-
-//#else
-// #ifndef _NDP2
-//   #include "errorext.h"
-// #else
-//   #include "errorext.h"
-// #endif
-//#endif
+#include <error1.h>
 
 
+
+/// @brief Читает и проверяет начало S-файла: метку `SMT`, версию (>= 102), число «паскалевых» строк; пропускает две строки заголовка.
+/// @param[in] szFileName  имя файла (для сообщения об ошибке)
+/// @return 0 — успех; -1 — ошибка чтения; -2 — не S-файл или версия младше 102.
 static int Read_TITLE( char *szFileName );
+/// @brief Читает строку сетки и имена файлов (.tpl, .s) каждой сетки; выделяет массив индексов.
+/// @param[out] si             массив из `*extrapol_flag+1` индексов (имена по `FILENAME_MAX` байт); при ошибке NULL
+/// @param[out] extrapol_flag  число сеток минус один, 0..2
+/// @return 0 — успех; -1 — ошибка чтения или неверные данные; -2 — нет памяти.
 static int Read_GRID( S_INDEX **si, int *extrapol_flag );
+/// @brief Читает «паскалеву» строку в буфер и завершает её нулём.
+/// @param[out] string  буфер не короче `FILENAME_MAX`
+/// @return 0 — успех; -1 — ошибка чтения или длина вне 0..`FILENAME_MAX`-1.
 static int read_string( char *string );
+/// @brief Пропускает разделитель (2 байта).
+/// @return 0 — успех; -1 — ошибка чтения.
 static int read_CR( void );
 
 
@@ -89,16 +100,16 @@ int read_S_matrix( char *szFileName, S_INDEX **si, int *extrapol_flag,
                         _complex ***sss, FREQUENCY *frq_out, INPUT_DATA **id)
  {
   int ret_code = 0, i, m;
-  WORD len, length, wBuff = 0;
+  WORD len, length, wBuff;
   INT_1 sBuff;
   int iBuff;
   INT_1 *lpnArr;
   double dTmp;
   double *lpdTmp;
-  fpos_t  lNextPoint, lOffset;
+  fpos_t  lNextPoint;
+  long    lOffset;
   FILE *sf;
 
-//   put_trace( (char _far *)trace );
 
   frq_out->max = 0;
 
@@ -143,7 +154,6 @@ int read_S_matrix( char *szFileName, S_INDEX **si, int *extrapol_flag,
            // set position in the offset table
            if( i != 0 )  
 		   { 
-//			   if( fseek( sf, (long)lNextPoint, SEEK_SET ) != 0 ) ret_code = -1; 
 			   if( fsetpos( sf, &lNextPoint ) != 0 ) ret_code = -1; 
 		   };
 //
@@ -181,6 +191,7 @@ int read_S_matrix( char *szFileName, S_INDEX **si, int *extrapol_flag,
 		   }
 
            if( ret_code == 0 ) ret_code = read_S( &sBuff, sizeof(INT_1) );
+           if( ( ret_code == 0 )&&( ( sBuff < 0 )||( sBuff > MAX_INPUT_NUM ) ) ) { ret_code = -1; sBuff = 0; }	// BUG-026
            (*id)[i].num = sBuff;
            for( m = 0, lpnArr = (*id)[i].array; (m < (*id)[i].num)&&(ret_code == 0 ); m++, lpnArr++ )
              {
@@ -188,6 +199,7 @@ int read_S_matrix( char *szFileName, S_INDEX **si, int *extrapol_flag,
               *lpnArr = sBuff;
              }
            if( ret_code == 0 ) ret_code = read_S( &sBuff, sizeof(INT_1) );
+           if( ( ret_code == 0 )&&( ( sBuff < 1 )||( sBuff > 255 ) ) ) { ret_code = -1; sBuff = 0; }	// BUG-026: len = dim*dim - WORD
            (*id)[i].dim = sBuff;
            if( ret_code == 0 ) ret_code = read_CR();
 
@@ -196,7 +208,7 @@ int read_S_matrix( char *szFileName, S_INDEX **si, int *extrapol_flag,
              {
               len = ((*id)[i].dim)*((*id)[i].dim);
               if( ( (*sss)[i] = (_complex *)alloc_mem_err( (long)sizeof(_complex)*len ) ) == NULL )
-                ret_code = i;
+                ret_code = ( i > 0 ) ? i : -1;	// I-10: at i = 0 it was 0 = "no error" and the read went into NULL
              }
            lpdTmp = (double *)(*sss)[i];
            if( ret_code == 0 ) ret_code = read_S( lpdTmp, (size_t)2*sizeof(double)*len );
@@ -334,13 +346,17 @@ static int Read_TITLE( char *szFileName )
 static int Read_GRID( S_INDEX **si, int *extrapol_flag )
   {
    int ret_code = 0;
-   INT_1 length, sBuff = 0;
+   INT_1 length, sBuff;
    int i;
+
+   *si = NULL;	// A-25: pri oshibke chteniya nichego ne osvobozhdat zrya
 
    // reading length of the GRID string ( useless here )
    ret_code = read_S( &length, (size_t)sizeof(INT_1) );
    // extrapolation flag 0 - no, 1 - two grids, 2 - three grids 
    if( ret_code == 0) ret_code = read_S( &sBuff, sizeof(INT_1) );
+   if( ( ret_code == 0 )&&( ( sBuff < 0 )||( sBuff > 2 ) ) ) ret_code = -1;	// BUG-026: 0..2 setki
+   if( ret_code != 0 ) { *extrapol_flag = 0; return -1; }	// BUG-026: *si eshche ne vydelen
    *extrapol_flag = sBuff;
 
    if( ret_code == 0 )
@@ -366,7 +382,8 @@ static int Read_GRID( S_INDEX **si, int *extrapol_flag )
 
      if( ret_code != 0 )
        {
-        free_mem( *si );
+        if( *si != NULL ) free_mem( *si );	// A-25
+        *si = NULL;
         return -1;
        }
 
@@ -378,11 +395,11 @@ static int Read_GRID( S_INDEX **si, int *extrapol_flag )
            if( ( (*si)[i].S_name = (char *)alloc_mem_err( (long)sizeof(char)*FILENAME_MAX ) ) == NULL)
              {
               free_mem( (*si)[i].tpl_name );
-              ret_code = i;
+              ret_code = ( i > 0 ) ? i : -1;	// I-10: at i = 0 it was 0 = "no error"
              }
           }
         else
-           ret_code = i;
+           ret_code = ( i > 0 ) ? i : -1;	// I-10
        }
 
      if( ret_code != 0 )
@@ -396,13 +413,18 @@ static int Read_GRID( S_INDEX **si, int *extrapol_flag )
         return -2;
        }
 
-     // reading strings with file names 
+     // reading strings with file names
      for( i = 0; ( i <= (*extrapol_flag) )&&( ret_code == 0 ); i++ )
        {
         ret_code = read_string( (*si)[i].tpl_name );
         if( ret_code == 0 ) ret_code = read_string( (*si)[i].S_name );
        }
 
+   if( ret_code != 0 )		/* N-31: imena ne prochitalis - osvobodit si i imena */
+     {
+      Free_GRID_Index( si, *extrapol_flag );
+      return -1;
+     }
    return ret_code;
   } // end of Read_GRID
 
@@ -413,6 +435,7 @@ static int read_string( char *string )
   INT_1 length;
 
   if( read_S( &length, sizeof(INT_1) ) != 0 )        return -1; //  reading string length
+  if( ( length < 0 )||( length >= FILENAME_MAX ) )    return -1; //  BUG-026: dlina iz faila
   if( read_S( string, sizeof( char )*length ) != 0 ) return -1; //  reading string
   string[length] = 0;                                           //  marking end of string
   if( read_CR() != 0) return -1;                                //  reading separator

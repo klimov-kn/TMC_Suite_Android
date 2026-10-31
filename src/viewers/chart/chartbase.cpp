@@ -117,6 +117,18 @@ ChartBase::ChartBase(QQuickItem *parent)
 {
     setAntialiasing(true);
     setOpaquePainting(true);
+    // Касания разбирает TouchGesture; мышь на ПК — обработчики QML в ChartScreen.
+    setAcceptTouchEvents(true);
+    m_touch.onDrag = [this](const QPointF &d) { panBy(d.x(), d.y()); };
+    m_touch.onPinch = [this](double f, const QPointF &c, const QPointF &d) {
+        panBy(d.x(), d.y());
+        zoomAt(f, c.x(), c.y());
+    };
+    m_touch.onTap = [this](const QPointF &p) { pick(p.x(), p.y()); };
+    m_touch.onDoubleTap = [this](const QPointF &) {
+        clearPick();
+        resetView();
+    };
     connect(this, &QQuickItem::widthChanged, this, [this] { update(); });
     connect(this, &QQuickItem::heightChanged, this, [this] { update(); });
     // Смена языка: подписи осей, рядов и сводки — заново.
@@ -474,6 +486,16 @@ QPointF ChartBase::toData(const QRectF &plot, const QRectF &view, QPointF p) con
 }
 
 // --- Жесты ------------------------------------------------------------------------
+
+void ChartBase::touchEvent(QTouchEvent *e)
+{
+    m_touch.process(e);
+}
+
+void ChartBase::touchUngrabEvent()
+{
+    m_touch.reset();
+}
 
 void ChartBase::zoomAt(qreal factor, qreal x, qreal y)
 {
