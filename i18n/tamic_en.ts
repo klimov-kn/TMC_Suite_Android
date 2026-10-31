@@ -1838,6 +1838,10 @@ Inter (Rasmus Andersson) and JetBrains Mono (JetBrains) — fonts, SIL Open Font
         <source>Ядро расчёта</source>
         <translation>Kernel</translation>
     </message>
+    <message>
+        <source>Замер времени</source>
+        <translation>Time report</translation>
+    </message>
 </context>
 <context>
     <name>TaskStore</name>

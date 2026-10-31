@@ -151,6 +151,7 @@ set_target_properties(tamic PROPERTIES
 
 # Точный состав Qt в APK: без отладочных модулей qmltooling (один из них тянет Qt6Quick3DUtils
 # под GPL), без TLS и сведений о сети, которые приложению без доступа к сети не нужны.
+# QML-плагины перечислены тоже: при заданном списке androiddeployqt их сам не добавляет.
 if(ANDROID)
     set(_tamic_qt_deps
         jar/Qt6Android.jar
@@ -160,21 +161,35 @@ if(ANDROID)
         lib/libQt6Gui_arm64-v8a.so
         lib/libQt6Network_arm64-v8a.so
         lib/libQt6OpenGL_arm64-v8a.so
-        lib/libQt6QmlMeta_arm64-v8a.so
+        lib/libQt6Qml_arm64-v8a.so
         lib/libQt6QmlModels_arm64-v8a.so
         lib/libQt6QmlWorkerScript_arm64-v8a.so
-        lib/libQt6Qml_arm64-v8a.so
-        lib/libQt6QuickLayouts_arm64-v8a.so
-        lib/libQt6QuickShapes_arm64-v8a.so
-        lib/libQt6QuickTemplates2_arm64-v8a.so
+        lib/libQt6QmlMeta_arm64-v8a.so
         lib/libQt6Quick_arm64-v8a.so
         lib/libQt6Svg_arm64-v8a.so
-        plugins/iconengines/libplugins_iconengines_qsvgicon_arm64-v8a.so
+        lib/libQt6QuickShapes_arm64-v8a.so
+        lib/libQt6QuickTemplates2_arm64-v8a.so
+        lib/libQt6QuickLayouts_arm64-v8a.so
+        plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so
         plugins/imageformats/libplugins_imageformats_qgif_arm64-v8a.so
         plugins/imageformats/libplugins_imageformats_qico_arm64-v8a.so
         plugins/imageformats/libplugins_imageformats_qjpeg_arm64-v8a.so
         plugins/imageformats/libplugins_imageformats_qsvg_arm64-v8a.so
-        plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so
+        plugins/iconengines/libplugins_iconengines_qsvgicon_arm64-v8a.so
+        qml/QtQml/qmldir
+        qml/QtQml/libqml_QtQml_qmlplugin_arm64-v8a.so
+        qml/QtQml/Models/qmldir
+        qml/QtQml/Models/libqml_QtQml_Models_modelsplugin_arm64-v8a.so
+        qml/QtQml/WorkerScript/qmldir
+        qml/QtQml/WorkerScript/libqml_QtQml_WorkerScript_workerscriptplugin_arm64-v8a.so
+        qml/QtQuick/qmldir
+        qml/QtQuick/libqml_QtQuick_qtquick2plugin_arm64-v8a.so
+        qml/QtQuick/Layouts/qmldir
+        qml/QtQuick/Layouts/libqml_QtQuick_Layouts_qquicklayoutsplugin_arm64-v8a.so
+        qml/QtQuick/Shapes/qmldir
+        qml/QtQuick/Shapes/libqml_QtQuick_Shapes_qmlshapesplugin_arm64-v8a.so
+        qml/QtQuick/Templates/qmldir
+        qml/QtQuick/Templates/libqml_QtQuick_Templates_qtquicktemplates2plugin_arm64-v8a.so
     )
     set_target_properties(tamic PROPERTIES QT_ANDROID_DEPLOYMENT_DEPENDENCIES "${_tamic_qt_deps}")
 endif()
