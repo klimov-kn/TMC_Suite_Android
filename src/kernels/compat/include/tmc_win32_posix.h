@@ -437,10 +437,22 @@ inline DWORD GetFullPathNameA(const char* fileName, DWORD bufLen, char* buf, cha
 /// обычный приоритет; на результат расчёта это не влияет.
 inline BOOL SetThreadPriority(void* /*thread*/, int /*priority*/) { return TRUE; }
 
-/// Ожидание ВСЕХ потоков (bWaitAll = TRUE — единственный вызов в коде).
 /// Признак завершения потока, не забирающий его (join после этого корректен):
-/// у завершившегося, но ещё не присоединённого потока glibc отвечает ESRCH на
-/// pthread_getcpuclockid — система обнуляет номер потока при его выходе.
+/// система обнуляет номер потока при его выходе. У завершившегося, но ещё не
+/// присоединённого потока glibc отвечает ESRCH на pthread_getcpuclockid, а bionic
+/// отвечает успехом всегда, поэтому на Android читается сам номер потока: по этому
+/// же полю завершения ждёт pthread_join.
+inline bool TmcThreadRunning(pthread_t thread)
+{
+#ifdef __ANDROID__
+    return pthread_gettid_np(thread) > 0;
+#else
+    clockid_t cid;
+    return pthread_getcpuclockid(thread, &cid) == 0;
+#endif
+}
+
+/// Ожидание ВСЕХ потоков (bWaitAll = TRUE — единственный вызов в коде).
 inline DWORD WaitForMultipleObjects(DWORD count, void* const* handles, BOOL /*waitAll*/, DWORD ms)
 {
     struct timespec t0;
@@ -448,8 +460,7 @@ inline DWORD WaitForMultipleObjects(DWORD count, void* const* handles, BOOL /*wa
     for (;;) {
         bool all = true;
         for (DWORD k = 0; k < count && all; ++k) {
-            clockid_t cid;
-            if (pthread_getcpuclockid((pthread_t)(uintptr_t)handles[k], &cid) == 0)
+            if (TmcThreadRunning((pthread_t)(uintptr_t)handles[k]))
                 all = false;
         }
         if (all)
